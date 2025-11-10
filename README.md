@@ -121,6 +121,10 @@ Original dataset addresses:
 3. Receiving localization results
    - The localization program outputs TF topics at the same frequency as the IMU (50-100Hz).
 
+### Debugging with Docker Images
+
+First, you need to install the Docker environment on your host machine (though Docker Desktop is not recommended). Using Docker to package and deploy your environment significantly reduces software installation and compilation time while preventing contamination of your main environment. For the location of the Dockerfile and pre-built Docker images, along with usage instructions, refer to the documentation in the docker folder.
+
 ### Debugging on Your Own Device
 
 First, you need to know your LiDAR type and set the corresponding `fasterlio.lidar_type`. Set it to 1 for Livox series, 2 for Velodyne, 3 for Ouster.
@@ -286,6 +290,10 @@ Ubuntu 20.04 应该也可行，未测试。
 
 3. 接收定位结果
     - 定位程序输出与IMU同频的TF话题（50-100Hz）
+
+### 使用Docker镜像调试
+
+首先您需要在自己的主机中安装好Docker环境（但是不推荐安装Docker-Desktop），使用Docker打包并部署环境可以大大节省软件安装与编译时间，并且可以避免主环境被污染，Dockerfile及制作好的Docker镜像存放地址以及使用方法可以参考docker文件夹下的文档
 
 ### 在您自己的设备上调试
 
