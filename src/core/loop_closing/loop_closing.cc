@@ -52,6 +52,19 @@ void LoopClosing::Init(const std::string yaml_path) {
         options_.ndt_score_th_ = yaml.GetValue<double>("loop_closing", "ndt_score_th");
         options_.with_height_ = yaml.GetValue<bool>("loop_closing", "with_height");
     }
+    
+    // Initialize Multi-Hypothesis Loop Closing Manager
+    if (options_.use_multi_hypothesis_) {
+        LoopHypothesisManager::Config hyp_config;
+        hyp_config.max_hypotheses_ = options_.max_hypotheses_;
+        hyp_config.commit_threshold_ = options_.commit_threshold_;
+        hyp_config.min_validations_ = options_.min_validations_;
+        hyp_config.max_hypothesis_age_ = options_.max_hypothesis_age_;
+        hypothesis_manager_ = std::make_unique<LoopHypothesisManager>(hyp_config);
+        LOG(INFO) << "[Multi-Hypothesis LC] Initialized with max_hyp=" << options_.max_hypotheses_
+                  << " commit_th=" << options_.commit_threshold_ 
+                  << " min_val=" << options_.min_validations_;
+    }
 
     if (options_.online_mode_) {
         LOG(INFO) << "loop closing module is running in online mode";
@@ -86,6 +99,11 @@ void LoopClosing::HandleKF(Keyframe::Ptr kf) {
 
     // 计算回环位姿
     ComputeLoopCandidates();
+    
+    // Multi-Hypothesis Processing
+    if (options_.use_multi_hypothesis_ && hypothesis_manager_) {
+        ProcessHypotheses();
+    }
 
     // 位姿图优化
     PoseOptimization();
@@ -295,6 +313,10 @@ void LoopClosing::ComputeForCandidate(lightning::LoopCandidate& c) {
         Tw2 = ndt.getFinalTransformation();
 
         c.ndt_score_ = ndt.getTransformationProbability();
+        
+        // Compute ICP fitness for multi-hypothesis scoring
+        // Fitness is avg squared distance of correspondences (lower is better)
+        c.icp_fitness_ = ndt.getFitnessScore();
     }
 
     Mat4d T = Tw2.cast<double>();
@@ -303,11 +325,70 @@ void LoopClosing::ComputeForCandidate(lightning::LoopCandidate& c) {
     Vec3d t = T.block<3, 1>(0, 3);
 
     c.Tij_ = kf1->GetLIOPose().inverse() * SE3(q, t);
+    
+    // Set initial geometric consistency based on transform reasonableness
+    double trans_norm = c.Tij_.translation().norm();
+    double rot_angle = Eigen::AngleAxisd(c.Tij_.rotationMatrix()).angle();
+    // Good consistency if transform is reasonable (not too large)
+    c.geometric_consistency_ = std::max(0.0, 1.0 - trans_norm / 10.0) * 
+                               std::max(0.0, 1.0 - rot_angle / M_PI);
+    
+    // Initial confidence computation
+    c.ComputeConfidence();
 
     // pcl::io::savePCDFileBinaryCompressed(
     //     "./data/lc_" + std::to_string(c.idx1_) + "_" + std::to_string(c.idx2_) + "_out.pcd", *output);
     // pcl::io::savePCDFileBinaryCompressed(
     //     "./data/lc_" + std::to_string(c.idx1_) + "_" + std::to_string(c.idx2_) + "_tgt.pcd", *rough_map1);
+}
+
+void LoopClosing::ProcessHypotheses() {
+    if (!hypothesis_manager_) return;
+    
+    int current_frame = cur_kf_->GetID();
+    
+    // Validate existing hypotheses with new candidates
+    hypothesis_manager_->ValidateWithFrame(current_frame, cur_kf_->GetOptPose(), candidates_);
+    
+    // Add new high-quality candidates as hypotheses
+    for (const auto& c : candidates_) {
+        if (c.ndt_score_ > options_.ndt_score_th_ * 0.8) {  // Slightly lower threshold for hypotheses
+            hypothesis_manager_->AddHypothesis(c, current_frame);
+            total_hypotheses_created_++;
+        }
+    }
+    
+    // Prune old/rejected hypotheses
+    int active_before = hypothesis_manager_->GetActiveCount();
+    hypothesis_manager_->PruneHypotheses(current_frame);
+    int pruned = active_before - hypothesis_manager_->GetActiveCount();
+    total_hypotheses_rejected_ += pruned;
+    
+    if (options_.verbose_) {
+        LOG(INFO) << "[Multi-Hyp] Frame " << current_frame 
+                  << " active=" << hypothesis_manager_->GetActiveCount()
+                  << " created=" << total_hypotheses_created_
+                  << " committed=" << total_hypotheses_committed_
+                  << " rejected=" << total_hypotheses_rejected_;
+    }
+}
+
+void LoopClosing::CommitHighConfidenceLoops() {
+    if (!hypothesis_manager_) return;
+    
+    auto committable = hypothesis_manager_->GetCommittableHypotheses();
+    
+    for (const auto& hyp : committable) {
+        // Add as a confirmed loop closure candidate
+        candidates_.push_back(hyp);
+        total_hypotheses_committed_++;
+        
+        if (options_.verbose_) {
+            LOG(INFO) << "[Multi-Hyp] COMMITTED loop " << hyp.idx1_ << " <-> " << hyp.idx2_
+                      << " confidence=" << hyp.confidence_
+                      << " validations=" << hyp.validation_count_;
+        }
+    }
 }
 
 void LoopClosing::PoseOptimization() {
@@ -343,6 +424,11 @@ void LoopClosing::PoseOptimization() {
         e->SetMeasurement(0);
         e->SetInformation(Mat1d::Identity() * 1.0 / (options_.height_noise_ * options_.height_noise_));
         optimizer_->AddEdge(e);
+    }
+    
+    // Multi-Hypothesis: Commit high-confidence loops before adding constraints
+    if (options_.use_multi_hypothesis_) {
+        CommitHighConfidenceLoops();
     }
 
     /// 回环的约束

@@ -65,6 +65,11 @@ class Keyframe {
     // Low surprise = likely revisiting known area = loop candidate
     void SetFrameSurprise(double surprise) { frame_surprise_ = surprise; }
     double GetFrameSurprise() const { return frame_surprise_; }
+    
+    // Pose uncertainty from ESKF covariance (trace of position covariance)
+    // High uncertainty = less confident in pose estimate
+    void SetPoseUncertainty(double uncertainty) { pose_uncertainty_ = uncertainty; }
+    double GetPoseUncertainty() const { return pose_uncertainty_; }
 
    protected:
     unsigned long id_ = 0;
@@ -79,6 +84,7 @@ class Keyframe {
     NavState state_;  // 卡尔曼滤波器状态
     
     double frame_surprise_ = 0.0;  // PGFF surprise score for loop detection
+    double pose_uncertainty_ = 0.0; // Pose uncertainty from ESKF covariance trace
 };
 
 }  // namespace lightning

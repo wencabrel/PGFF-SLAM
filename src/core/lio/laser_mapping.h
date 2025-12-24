@@ -219,6 +219,7 @@ class LaserMapping {
     std::vector<float> pgff_predicted_residuals_;
     std::vector<float> pgff_point_weights_;  // Weights for each point (based on surprise)
     double current_frame_surprise_ = 0.0;    // Current frame's surprise score
+    double current_pose_uncertainty_ = 0.0;  // Current pose uncertainty from ESKF covariance
     
     /// Compute PGFF weights based on surprise scores
     void ComputePGFFWeights(int num_points);

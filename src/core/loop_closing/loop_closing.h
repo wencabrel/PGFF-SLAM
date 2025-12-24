@@ -12,11 +12,14 @@
 #include "core/graph/optimizer.h"
 #include "core/types/edge_se3.h"
 
+#include <memory>
+
 namespace lightning {
 
 /**
  * 基于grid ndt的回环检测
  * Enhanced with PGFF surprise-based early loop detection
+ * Enhanced with Multi-Hypothesis Loop Closing for groundbreaking performance
  */
 class LoopClosing {
    public:
@@ -48,6 +51,13 @@ class LoopClosing {
         bool use_pgff_surprise_ = true;       // Enable PGFF surprise detection
         double surprise_drop_threshold_ = 0.3; // Threshold for surprise drop detection
         int surprise_early_gap_ = 5;          // Reduced gap when surprise drops
+        
+        // Multi-Hypothesis Loop Closing options
+        bool use_multi_hypothesis_ = true;    // Enable multi-hypothesis tracking
+        int max_hypotheses_ = 10;             // Maximum hypotheses to track
+        double commit_threshold_ = 0.6;       // Confidence threshold for committing loops
+        int min_validations_ = 2;             // Minimum validations before commit
+        int max_hypothesis_age_ = 15;         // Max frames before rejecting hypothesis
     };
 
     LoopClosing(Options options = Options()) { options_ = options; }
@@ -78,6 +88,10 @@ class LoopClosing {
 
     /// 优化位姿
     void PoseOptimization();
+    
+    /// Multi-hypothesis loop closing
+    void ProcessHypotheses();
+    void CommitHighConfidenceLoops();
 
     Options options_;
 
@@ -103,6 +117,12 @@ class LoopClosing {
     double last_frame_surprise_ = 0.0;
     double surprise_moving_avg_ = 0.0;
     int frames_since_surprise_drop_ = 0;
+    
+    // Multi-Hypothesis Loop Closing
+    std::unique_ptr<LoopHypothesisManager> hypothesis_manager_;
+    int total_hypotheses_created_ = 0;
+    int total_hypotheses_committed_ = 0;
+    int total_hypotheses_rejected_ = 0;
 };
 
 }  // namespace lightning

@@ -16,6 +16,7 @@ class UiCloud {
         HEIGHT_COLOR,     // 高度
         GRAY_COLOR,       // 显示为灰色
         CUSTOM_COLOR,     // 显示为自定颜色
+        UNCERTAINTY_COLOR, // 不确定性着色 (green=confident, red=uncertain)
     };
 
     UiCloud() {}
@@ -27,6 +28,14 @@ class UiCloud {
      * @param pose              点云位姿: Twi，
      */
     void SetCloud(CloudPtr cloud, const SE3& pose);
+    
+    /**
+     * Set cloud with per-point uncertainty values
+     * @param cloud             PCL point cloud
+     * @param pose              Point cloud pose: Twi
+     * @param uncertainty       Uncertainty value (0=confident, 1=uncertain)
+     */
+    void SetCloudWithUncertainty(CloudPtr cloud, const SE3& pose, double uncertainty);
 
     /// 渲染这个点云
     void Render();
@@ -52,6 +61,7 @@ class UiCloud {
     std::vector<Vec4f> color_data_intensity_;  // 点的intensity不映射直接做颜色
     std::vector<Vec4f> color_data_height_;     // 根据height映射得到的颜色
     std::vector<Vec4f> color_data_gray_;       // 全部点都为灰色
+    std::vector<Vec4f> color_data_uncertainty_; // 不确定性着色 (green->yellow->red)
 
     /// PCL中intensity table
     void BuildIntensityTable();

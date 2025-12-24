@@ -32,8 +32,9 @@ bool PangolinWindowImpl::Init() {
     /// data log
     log_vel_.SetLabels(std::vector<std::string>{"vel_x", "vel_y", "vel_z"});
     log_vel_baselink_.SetLabels(std::vector<std::string>{"baselink_vel_x", "baselink_vel_y", "baselink_vel_z"});
-    log_confidence_.SetLabels(std::vector<std::string>{"lidar loc confidence"});
-    log_error_.SetLabels(std::vector<std::string>{"err v", "err h", "err eval v", "err eval h"});
+    // PGFF metrics - more useful than generic confidence in SLAM mode
+    log_confidence_.SetLabels(std::vector<std::string>{"PGFF Surprise"});
+    log_error_.SetLabels(std::vector<std::string>{"Residual", "Uncertainty"});
 
     return true;
 }
@@ -177,7 +178,9 @@ bool PangolinWindowImpl::UpdateState() {
     // 滤波器状态作曲线图
     log_vel_.Log(vel_(0), vel_(1), vel_(2));
     log_vel_baselink_.Log(vel_baselink(0), vel_baselink(1), vel_baselink(2));
-    log_confidence_.Log(confidence_);
+    // Log PGFF metrics - surprise indicates novelty, residual indicates registration quality
+    log_confidence_.Log(pgff_surprise_ * 100.0);  // Scale to percentage for better visibility
+    log_error_.Log(opt_residual_, map_uncertainty_);  // Residual and uncertainty together
 
     newest_frontend_pose_ = pose_;
     traj_newest_state_->AddPt(newest_frontend_pose_);

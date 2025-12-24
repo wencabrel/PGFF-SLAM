@@ -187,6 +187,11 @@ struct NavState {
     bool pose_is_ok_ = true;           // 定位是否有效
     bool lidar_odom_reliable_ = true;  // lio是否有效
     bool is_parking_ = false;          // 是否在停车
+    
+    // PGFF metrics for monitoring SLAM quality
+    double pgff_surprise_ = 0.0;       // PGFF surprise score (0-1, higher = more novel)
+    double opt_residual_ = 0.0;        // Optimization residual (point-to-plane error)
+    double map_uncertainty_ = 0.0;     // Map uncertainty from ESKF covariance (sqrt of position trace)
 
     Vec3d pos_ = Vec3d::Zero();             // 位置
     SO3 rot_;                               // 旋转

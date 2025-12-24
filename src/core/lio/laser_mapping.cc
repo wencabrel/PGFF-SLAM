@@ -152,7 +152,14 @@ void LaserMapping::ProcessIMU(const lightning::IMUPtr &imu) {
 
         /// 更新ui
         if (ui_) {
-            ui_->UpdateNavState(kf_imu_.GetX());
+            auto nav_state = kf_imu_.GetX();
+            // Add PGFF metrics for real-time monitoring
+            nav_state.pgff_surprise_ = current_frame_surprise_;
+            nav_state.opt_residual_ = kf_.GetFinalRes();
+            // Compute map uncertainty from ESKF covariance
+            auto P = kf_.GetP();
+            nav_state.map_uncertainty_ = std::sqrt(P(0,0) + P(1,1) + P(2,2));
+            ui_->UpdateNavState(nav_state);
         }
     }
 
@@ -198,7 +205,14 @@ bool LaserMapping::Run() {
         if (skip_lidar_cnt_ != 0) {
             /// 更新UI中的内容
             if (ui_) {
-                ui_->UpdateNavState(kf_.GetX());
+                auto nav_state = kf_.GetX();
+                // Add PGFF metrics for real-time monitoring
+                nav_state.pgff_surprise_ = current_frame_surprise_;
+                nav_state.opt_residual_ = kf_.GetFinalRes();
+                // Compute map uncertainty from ESKF covariance
+                auto P = kf_.GetP();
+                nav_state.map_uncertainty_ = std::sqrt(P(0,0) + P(1,1) + P(2,2));
+                ui_->UpdateNavState(nav_state);
                 ui_->UpdateScan(scan_undistort_, kf_.GetX().GetPose());
             }
 
@@ -316,6 +330,12 @@ void LaserMapping::MakeKF() {
     
     // Set PGFF frame surprise for loop closing
     kf->SetFrameSurprise(current_frame_surprise_);
+    
+    // Compute pose uncertainty from ESKF covariance
+    // Use trace of position covariance (first 3x3 block) as uncertainty metric
+    auto P = kf_.GetP();
+    double pos_uncertainty = std::sqrt(P(0,0) + P(1,1) + P(2,2));  // sqrt of trace
+    kf->SetPoseUncertainty(pos_uncertainty);
 
     LOG(INFO) << "LIO: create kf " << kf->GetID() << ", state: " << state_point_.pos_.transpose()
               << ", kf opt pose: " << kf->GetOptPose().translation().transpose()

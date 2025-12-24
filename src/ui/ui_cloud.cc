@@ -24,6 +24,7 @@ void UiCloud::SetCloud(CloudPtr cloud, const SE3& pose) {
     color_data_intensity_.resize(cloud->size());
     color_data_height_.resize(cloud->size());
     color_data_gray_.resize(cloud->size());
+    color_data_uncertainty_.resize(cloud->size());
 
     std::vector<int> idx(cloud->size());
     std::iota(idx.begin(), idx.end(), 0);  // 使用从0开始递增的整数填充idx
@@ -40,7 +41,56 @@ void UiCloud::SetCloud(CloudPtr cloud, const SE3& pose) {
         // 把intensity映射为颜色
         color_data_pcl_[id] = IntensityToRgbPCL(pt.intensity);
         color_data_gray_[id] = Vec4f(0.6, 0.65, 0.7, 1.0);  // Light slate gray for better visibility
+        // Default: green (confident) for uncertainty color
+        color_data_uncertainty_[id] = Vec4f(0.2, 0.8, 0.2, 1.0);  // Green = confident
         // 根据高度映射颜色
+        color_data_height_[id] = IntensityToRgbPCL(pt.z * 10);
+        color_data_intensity_[id] =
+            Vec4f(pt.intensity / 255.0 * 3.0, pt.intensity / 255.0 * 3.0, pt.intensity / 255.0 * 3.0, 1.0);
+    }
+}
+
+// Set cloud with uncertainty coloring: 0=confident (green), 1=uncertain (red)
+void UiCloud::SetCloudWithUncertainty(CloudPtr cloud, const SE3& pose, double uncertainty) {
+    if (intensity_color_table_pcl_.empty()) {
+        BuildIntensityTable();
+    }
+
+    xyz_data_.resize(cloud->size());
+    color_data_pcl_.resize(cloud->size());
+    color_data_intensity_.resize(cloud->size());
+    color_data_height_.resize(cloud->size());
+    color_data_gray_.resize(cloud->size());
+    color_data_uncertainty_.resize(cloud->size());
+
+    std::vector<int> idx(cloud->size());
+    std::iota(idx.begin(), idx.end(), 0);
+
+    SE3f pose_l = (pose).cast<float>();
+    
+    // Clamp uncertainty to [0, 1]
+    float u = std::max(0.0, std::min(1.0, uncertainty));
+    
+    // Color gradient: green (0) -> yellow (0.5) -> red (1)
+    Vec4f uncertainty_color;
+    if (u < 0.5f) {
+        // Green to yellow
+        float t = u * 2.0f;
+        uncertainty_color = Vec4f(t, 0.8f, 0.2f * (1.0f - t), 1.0f);
+    } else {
+        // Yellow to red
+        float t = (u - 0.5f) * 2.0f;
+        uncertainty_color = Vec4f(1.0f, 0.8f * (1.0f - t), 0.0f, 1.0f);
+    }
+
+    for (auto iter = idx.begin(); iter != idx.end(); iter++) {
+        const int& id = *iter;
+        const auto& pt = cloud->points[id];
+        auto pt_world = pose_l * cloud->points[id].getVector3fMap();
+        xyz_data_[id] = Vec3f(pt_world.x(), pt_world.y(), pt_world.z());
+        color_data_pcl_[id] = IntensityToRgbPCL(pt.intensity);
+        color_data_gray_[id] = Vec4f(0.6, 0.65, 0.7, 1.0);
+        color_data_uncertainty_[id] = uncertainty_color;
         color_data_height_[id] = IntensityToRgbPCL(pt.z * 10);
         color_data_intensity_[id] =
             Vec4f(pt.intensity / 255.0 * 3.0, pt.intensity / 255.0 * 3.0, pt.intensity / 255.0 * 3.0, 1.0);
@@ -62,6 +112,8 @@ void UiCloud::Render() {
             glColor4f(color_data_height_[i][0], color_data_height_[i][1], color_data_height_[i][2], ui::opacity);
         } else if (use_color_ == UseColor::GRAY_COLOR) {
             glColor4f(color_data_gray_[i][0], color_data_gray_[i][1], color_data_gray_[i][2], ui::opacity);
+        } else if (use_color_ == UseColor::UNCERTAINTY_COLOR) {
+            glColor4f(color_data_uncertainty_[i][0], color_data_uncertainty_[i][1], color_data_uncertainty_[i][2], ui::opacity);
         } else if (use_color_ = UseColor::CUSTOM_COLOR) {
             glColor4f(custom_color_[0], custom_color_[1], custom_color_[2], ui::opacity);
         }

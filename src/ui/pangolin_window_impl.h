@@ -90,6 +90,11 @@ class PangolinWindowImpl {
     Vec3d bias_acc_;
     Vec3d bias_gyr_;
     Vec3d grav_;
+    
+    // PGFF monitoring metrics
+    double pgff_surprise_ = 0.0;   // Frame surprise score
+    double opt_residual_ = 0.0;    // Optimization residual
+    double map_uncertainty_ = 0.0; // Map uncertainty from ESKF covariance
 
     Sophus::SE3d T_imu_lidar_;
     int max_size_of_current_scan_ = 200;  // 当前扫描数据保留多少个
