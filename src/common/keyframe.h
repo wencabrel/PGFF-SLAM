@@ -61,6 +61,11 @@ class Keyframe {
         return state_;
     }
 
+    // PGFF frame surprise - indicates how "familiar" the geometry is
+    // Low surprise = likely revisiting known area = loop candidate
+    void SetFrameSurprise(double surprise) { frame_surprise_ = surprise; }
+    double GetFrameSurprise() const { return frame_surprise_; }
+
    protected:
     unsigned long id_ = 0;
 
@@ -72,6 +77,8 @@ class Keyframe {
     SE3 pose_opt_;  // 后端优化后的pose
 
     NavState state_;  // 卡尔曼滤波器状态
+    
+    double frame_surprise_ = 0.0;  // PGFF surprise score for loop detection
 };
 
 }  // namespace lightning

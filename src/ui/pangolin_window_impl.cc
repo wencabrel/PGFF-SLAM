@@ -23,8 +23,8 @@ bool PangolinWindowImpl::Init() {
     pangolin::GetBoundWindow()->RemoveCurrent();
 
     // 雷达定位轨迹opengl设置
-    traj_newest_state_.reset(new ui::UiTrajectory(Vec3f(1.0, 0.0, 0.0)));  // 红色
-    traj_scans_.reset(new ui::UiTrajectory(Vec3f(0.0, 1.0, 0.0)));         // 绿色
+    traj_newest_state_.reset(new ui::UiTrajectory(Vec3f(0.98, 0.36, 0.26)));  // Coral red - Frontend
+    traj_scans_.reset(new ui::UiTrajectory(Vec3f(0.34, 0.82, 0.50)));         // Emerald green - Backend
 
     current_scan_.reset(new PointCloudType);  // 重置pcl点云指针
     current_scan_ui_.reset(new ui::UiCloud);  // 重置用于渲染的点云指针
@@ -224,10 +224,10 @@ void PangolinWindowImpl::DrawAll() {
 
         if (all_keyframes_.size() > 1) {
 
-            /// 闭环后的轨迹
-            glLineWidth(5.0);
+            /// 闭环后的轨迹 - Purple/Magenta for optimized trajectory
+            glLineWidth(4.0);
             glBegin(GL_LINE_STRIP);
-            glColor3f(0.5, 0.0, 0.5);
+            glColor3f(0.73, 0.33, 0.83);  // Vivid purple/magenta
 
             for (int i = 0; i < all_keyframes_.size() - 1; ++i) {
                 auto p1 = all_keyframes_[i]->GetOptPose().translation();
@@ -279,7 +279,7 @@ void PangolinWindowImpl::RenderLabels() {
     glLoadIdentity();
 
     glTranslatef(5, cur_height - 1.5 * gltext_label_global_.Height(), 1.0);
-    glColor3ub(127, 127, 127);
+    glColor3ub(220, 220, 230);  // Light gray/white for better visibility on dark background
     gltext_label_global_.Draw();
 
     // Restore modelview / project matrices
@@ -343,24 +343,32 @@ void PangolinWindowImpl::Render() {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    // menu
+    // menu - Create a clean, organized control panel
     pangolin::CreatePanel("menu").SetBounds(0.0, 1.0, 0.0, pangolin::Attach::Pix(menu_width_));
-    pangolin::Var<bool> menu_follow_loc("menu.Follow", false, true);                     // 跟踪实时定位
-    pangolin::Var<bool> menu_draw_frontend_traj("menu.Draw Frontend Traj", true, true);  // 前端实时轨迹
-    pangolin::Var<bool> menu_draw_backend_traj("menu.Draw Backend Traj", false, true);   // 后端实时轨迹
-    pangolin::Var<bool> menu_reset_3d_view("menu.Reset 3D View", false, false);          // 重置俯视视角
-    pangolin::Var<bool> menu_reset_front_view("menu.Set to front View", false, false);   // 前视视角
-    pangolin::Var<bool> menu_step("menu.Step", false, false);                            // 单步调试
-    pangolin::Var<float> menu_play_speed("menu.Play speed", 10.0, 0.1, 10.0);            // 运行速度
-    pangolin::Var<float> menu_intensity("menu.intensity", 0.5, 0.0, 1.0);                // 亮度
+    
+    // === View Controls ===
+    pangolin::Var<bool> menu_follow_loc("menu.Follow Robot", false, true);                 // 跟踪实时定位
+    pangolin::Var<bool> menu_draw_frontend_traj("menu.Show Frontend (Red)", true, true);   // 前端实时轨迹
+    pangolin::Var<bool> menu_draw_backend_traj("menu.Show Backend (Green)", false, true);  // 后端实时轨迹
+    
+    // === Camera Presets ===
+    pangolin::Var<bool> menu_reset_3d_view("menu.Top-Down View", false, false);            // 重置俯视视角
+    pangolin::Var<bool> menu_reset_front_view("menu.Side View", false, false);             // 前视视角
+    
+    // === Playback ===
+    pangolin::Var<bool> menu_step("menu.Step Mode", false, false);                         // 单步调试
+    pangolin::Var<float> menu_play_speed("menu.Playback Speed", 10.0, 0.1, 10.0);          // 运行速度
+    
+    // === Display Settings ===
+    pangolin::Var<float> menu_intensity("menu.Point Opacity", 0.7, 0.1, 1.0);              // 亮度
 
     // display layout
     CreateDisplayLayout();
 
     exit_flag_.store(false);
     while (!pangolin::ShouldQuit() && !exit_flag_) {
-        // Clear entire screen
-        glClearColor(20.0 / 255.0, 20.0 / 255.0, 20.0 / 255.0, 1.0);
+        // Clear entire screen - Modern dark slate blue background for better visibility
+        glClearColor(15.0 / 255.0, 23.0 / 255.0, 42.0 / 255.0, 1.0);  // Slate-900 color
         // 清除了颜色缓冲区（GL_COLOR_BUFFER_BIT）和深度缓冲区（GL_DEPTH_BUFFER_BIT）。
         // 通常在每一帧渲染之前执行的操作，以准备渲染新的内容。
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -416,9 +424,9 @@ std::string PangolinWindowImpl::GetWindowName() const { return win_name_; }
 
 void PangolinWindowImpl::AllocateBuffer() {
     std::string global_text(
-        "Welcome to SAD.UI. Open source code: https://github.com/gaoxiang12/slam_in_autonomous_driving. All right "
-        "reserved.\n"
-        "Red: newest IMU pose, yellow: lidar scan pose");
+        "Lightning SLAM - LiDAR-Inertial Odometry System\n"
+        "Controls: Mouse drag to rotate, Scroll to zoom, Shift+drag to pan\n"
+        "Red axis: Frontend pose | Green axis: Backend pose | Purple: Optimized trajectory");
     auto &font = pangolin::default_font();
     gltext_label_global_ = font.Text(global_text);
 }

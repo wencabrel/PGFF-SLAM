@@ -15,6 +15,9 @@
 #include "core/lio/imu_processing.hpp"
 #include "pointcloud_preprocess.h"
 
+// PGFF - Predictive Geometric Flow Fields
+#include "core/pgff/pgff.h"
+
 #include "livox_ros_driver2/msg/custom_msg.hpp"
 
 namespace lightning {
@@ -38,6 +41,9 @@ class LaserMapping {
         /// 关键帧阈值
         double kf_dis_th_ = 2.0;
         double kf_angle_th_ = 15 * M_PI / 180.0;
+        
+        /// PGFF options
+        bool enable_pgff_ = true;  // Enable Predictive Geometric Flow Fields (weighted point optimization)
     };
 
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
@@ -207,6 +213,22 @@ class LaserMapping {
     bool use_aa_ = false;  // use anderson acceleration?
 
     std::shared_ptr<ui::PangolinWindow> ui_ = nullptr;
+    
+    /// PGFF - Predictive Geometric Flow Fields
+    std::unique_ptr<pgff::PredictiveLIO> pgff_ = nullptr;
+    std::vector<float> pgff_predicted_residuals_;
+    std::vector<float> pgff_point_weights_;  // Weights for each point (based on surprise)
+    double current_frame_surprise_ = 0.0;    // Current frame's surprise score
+    
+    /// Compute PGFF weights based on surprise scores
+    void ComputePGFFWeights(int num_points);
+    
+public:
+    /// Get the current frame's PGFF surprise score (for loop closing integration)
+    double GetFrameSurprise() const { return current_frame_surprise_; }
+    
+    /// Check if PGFF is enabled and active
+    bool IsPGFFEnabled() const { return options_.enable_pgff_ && pgff_ && pgff_->IsEnabled(); }
 };
 
 }  // namespace lightning

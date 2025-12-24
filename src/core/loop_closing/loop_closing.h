@@ -16,6 +16,7 @@ namespace lightning {
 
 /**
  * 基于grid ndt的回环检测
+ * Enhanced with PGFF surprise-based early loop detection
  */
 class LoopClosing {
    public:
@@ -42,6 +43,11 @@ class LoopClosing {
 
         bool with_height_ = true;
         double height_noise_ = 0.1;
+        
+        // PGFF surprise-based loop detection
+        bool use_pgff_surprise_ = true;       // Enable PGFF surprise detection
+        double surprise_drop_threshold_ = 0.3; // Threshold for surprise drop detection
+        int surprise_early_gap_ = 5;          // Reduced gap when surprise drops
     };
 
     LoopClosing(Options options = Options()) { options_ = options; }
@@ -60,6 +66,9 @@ class LoopClosing {
     void HandleKF(Keyframe::Ptr kf);
 
     void DetectLoopCandidates();
+    
+    /// Check if surprise indicates possible loop closure (revisiting known area)
+    bool IsSurpriseBasedLoopTrigger();
 
     /// 计算回环候选位姿
     void ComputeLoopCandidates();
@@ -89,6 +98,11 @@ class LoopClosing {
     std::vector<std::shared_ptr<miao::EdgeSE3>> edge_loops_;
 
     LoopClosedCallback loop_cb_;
+    
+    // PGFF surprise tracking for loop detection
+    double last_frame_surprise_ = 0.0;
+    double surprise_moving_avg_ = 0.0;
+    int frames_since_surprise_drop_ = 0;
 };
 
 }  // namespace lightning

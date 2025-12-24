@@ -39,7 +39,7 @@ void UiCloud::SetCloud(CloudPtr cloud, const SE3& pose) {
         xyz_data_[id] = Vec3f(pt_world.x(), pt_world.y(), pt_world.z());
         // 把intensity映射为颜色
         color_data_pcl_[id] = IntensityToRgbPCL(pt.intensity);
-        color_data_gray_[id] = Vec4f(0.5, 0.5, 0.5, 1.0);
+        color_data_gray_[id] = Vec4f(0.6, 0.65, 0.7, 1.0);  // Light slate gray for better visibility
         // 根据高度映射颜色
         color_data_height_[id] = IntensityToRgbPCL(pt.z * 10);
         color_data_intensity_[id] =
@@ -73,18 +73,33 @@ void UiCloud::Render() {
 
 void UiCloud::BuildIntensityTable() {
     intensity_color_table_pcl_.reserve(255 * 3);
-    // 接受rgb三个值，将它们归一化到范围 [0, 1]，同时设置 alpha 通道为0.2。
-    auto make_color = [](int r, int g, int b) -> Vec4f { return Vec4f(r / 255.0f, g / 255.0f, b / 255.0f, 0.2f); };
+    // Modern viridis-inspired color palette for better visual appeal
+    auto make_color = [](int r, int g, int b) -> Vec4f { return Vec4f(r / 255.0f, g / 255.0f, b / 255.0f, 0.7f); };
 
+    // Viridis-inspired gradient: purple -> blue -> teal -> green -> yellow
     for (int i = 0; i < 256; i++) {
-        intensity_color_table_pcl_.emplace_back(make_color(255, i, 0));
+        // Purple to blue transition
+        float t = i / 255.0f;
+        int r = static_cast<int>(68 + t * (33 - 68));
+        int g = static_cast<int>(1 + t * (145 - 1));
+        int b = static_cast<int>(84 + t * (140 - 84));
+        intensity_color_table_pcl_.emplace_back(make_color(r, g, b));
     }
     for (int i = 0; i < 256; i++) {
-        intensity_color_table_pcl_.emplace_back(make_color(i, 0, 255));
+        // Blue to teal/green transition
+        float t = i / 255.0f;
+        int r = static_cast<int>(33 + t * (94 - 33));
+        int g = static_cast<int>(145 + t * (201 - 145));
+        int b = static_cast<int>(140 + t * (98 - 140));
+        intensity_color_table_pcl_.emplace_back(make_color(r, g, b));
     }
-
     for (int i = 0; i < 256; i++) {
-        intensity_color_table_pcl_.emplace_back(make_color(0, 255, i));
+        // Green to yellow transition
+        float t = i / 255.0f;
+        int r = static_cast<int>(94 + t * (253 - 94));
+        int g = static_cast<int>(201 + t * (231 - 201));
+        int b = static_cast<int>(98 + t * (37 - 98));
+        intensity_color_table_pcl_.emplace_back(make_color(r, g, b));
     }
 }
 

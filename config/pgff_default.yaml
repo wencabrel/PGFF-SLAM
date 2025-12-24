@@ -1,0 +1,43 @@
+# PGFF - Predictive Geometric Flow Fields Configuration
+# Add these parameters to your config file to enable PGFF
+
+pgff:
+  enabled: true
+  verbose: false
+  
+  # Selective processing - the core innovation
+  # Process only "surprising" points that carry information
+  selective_processing:
+    enabled: true
+    surprise_percentile: 0.25      # Process top 25% surprising points
+    min_surprising_points: 100     # Always process at least this many
+    max_surprising_points: 2000    # Cap to prevent overload
+    
+  # Surprise thresholds
+  surprise:
+    position_threshold: 0.10       # meters - position prediction error
+    normal_threshold: 0.30         # radians - normal prediction error  
+    residual_threshold: 0.15       # point-to-plane residual threshold
+    use_adaptive: true             # Auto-adjust thresholds
+    
+  # Jacobian caching - exploits temporal coherence
+  jacobian_cache:
+    enabled: true
+    position_validity: 0.15        # meters - max position change for valid cache
+    rotation_validity: 0.03        # radians - max rotation change for valid cache
+    time_validity: 0.20            # seconds - max time for valid cache
+    
+  # Flow field prediction
+  flow_field:
+    prediction_horizon_ms: 100.0   # How far ahead to predict
+    surface_coherence: 0.8         # Trust in surface continuity
+    motion_uncertainty: 1.2        # Scale for motion noise
+    
+  # Surprise-driven loop detection
+  loop_detection:
+    enabled: true
+    surprise_spike_threshold: 2.5  # Std deviations above mean
+    min_surprise: 0.8              # Absolute minimum for trigger
+    spike_duration: 3              # Frames of sustained surprise
+    min_distance: 20.0             # Min travel for loop consideration
+    min_keyframes: 30              # Min KF gap for loop

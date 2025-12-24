@@ -12,6 +12,11 @@ add_library(${PROJECT_NAME}.libs SHARED
         core/lio/pointcloud_preprocess.cc
         core/loop_closing/loop_closing.cc
 
+        # PGFF - Predictive Geometric Flow Fields
+        core/pgff/flow_field.cc
+        core/pgff/surprise_detector.cc
+        core/pgff/predictive_lio.cc
+
         core/g2p5/g2p5_map.cc
         core/g2p5/g2p5.cc
         core/g2p5/g2p5_subgrid.cc

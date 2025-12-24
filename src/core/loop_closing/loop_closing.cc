@@ -93,6 +93,54 @@ void LoopClosing::HandleKF(Keyframe::Ptr kf) {
     last_kf_ = kf;
 }
 
+bool LoopClosing::IsSurpriseBasedLoopTrigger() {
+    if (!options_.use_pgff_surprise_) {
+        return false;
+    }
+    
+    double current_surprise = cur_kf_->GetFrameSurprise();
+    
+    // Update moving average with exponential smoothing
+    const double alpha = 0.3;  // Smoothing factor
+    if (surprise_moving_avg_ == 0.0) {
+        surprise_moving_avg_ = current_surprise;
+    } else {
+        surprise_moving_avg_ = alpha * current_surprise + (1.0 - alpha) * surprise_moving_avg_;
+    }
+    
+    // Detect significant surprise drop (indicating familiar geometry)
+    // A drop means we're likely revisiting a known location
+    double surprise_drop = last_frame_surprise_ - current_surprise;
+    double relative_drop = (last_frame_surprise_ > 0.01) ? 
+                           surprise_drop / last_frame_surprise_ : 0.0;
+    
+    last_frame_surprise_ = current_surprise;
+    
+    // Trigger early loop detection if:
+    // 1. Surprise dropped significantly from previous frame
+    // 2. Or current surprise is much lower than moving average (familiar area)
+    bool trigger = false;
+    
+    if (relative_drop > options_.surprise_drop_threshold_) {
+        trigger = true;
+        if (options_.verbose_) {
+            LOG(INFO) << "PGFF: Surprise drop detected! " << relative_drop * 100 
+                      << "% drop - possible loop closure area";
+        }
+    }
+    
+    if (surprise_moving_avg_ > 0.01 && 
+        current_surprise < surprise_moving_avg_ * (1.0 - options_.surprise_drop_threshold_)) {
+        trigger = true;
+        if (options_.verbose_) {
+            LOG(INFO) << "PGFF: Low surprise detected! Current: " << current_surprise 
+                      << " vs avg: " << surprise_moving_avg_ << " - familiar geometry";
+        }
+    }
+    
+    return trigger;
+}
+
 void LoopClosing::DetectLoopCandidates() {
     candidates_.clear();
 
@@ -104,18 +152,30 @@ void LoopClosing::DetectLoopCandidates() {
         return;
     }
 
-    if (last_loop_kf_ && (cur_kf_->GetID() - last_loop_kf_->GetID()) <= options_.loop_kf_gap_) {
-        LOG(INFO) << "skip because last loop kf: " << last_loop_kf_->GetID();
+    // Determine the effective loop gap based on PGFF surprise
+    int effective_loop_gap = options_.loop_kf_gap_;
+    
+    if (IsSurpriseBasedLoopTrigger()) {
+        // Use reduced gap when surprise indicates familiar area
+        effective_loop_gap = options_.surprise_early_gap_;
+        if (options_.verbose_) {
+            LOG(INFO) << "PGFF: Using early loop gap: " << effective_loop_gap;
+        }
+    }
+
+    if (last_loop_kf_ && (cur_kf_->GetID() - last_loop_kf_->GetID()) <= effective_loop_gap) {
+        LOG(INFO) << "skip because last loop kf: " << last_loop_kf_->GetID() 
+                  << " (gap: " << effective_loop_gap << ")";
         return;
     }
 
     for (auto kf : kfs_mapping) {
-        if (check_first != nullptr && abs(int(kf->GetID() - check_first->GetID())) <= options_.min_id_interval_) {
+        if (check_first != nullptr && std::abs(static_cast<int>(kf->GetID() - check_first->GetID())) <= options_.min_id_interval_) {
             // 同条轨迹内，跳过一定的ID区间
             continue;
         }
 
-        if (abs(int(kf->GetID() - cur_kf_->GetID())) < options_.closest_id_th_) {
+        if (std::abs(static_cast<int>(kf->GetID() - cur_kf_->GetID())) < options_.closest_id_th_) {
             /// 在同一条轨迹中，如果间隔太近，就不考虑回环
             break;
         }
