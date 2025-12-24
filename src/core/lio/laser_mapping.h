@@ -226,11 +226,17 @@ class LaserMapping {
     double current_predicted_surprise_ = 0.0;  // Predicted surprise before observation
     double current_map_uncertainty_ = 0.0;     // Current map/pose uncertainty for UI
     
+    /// Learned Surprise Prior - Adaptive threshold learning (Option 4)
+    std::unique_ptr<pgff::LearnedSurprisePrior> surprise_prior_ = nullptr;
+    
     /// Compute PGFF weights based on surprise scores
     void ComputePGFFWeights(int num_points);
     
     /// Update information frontier with current observation
     void UpdateInformationFrontier();
+    
+    /// Update surprise prior with current frame observations
+    void UpdateSurprisePrior();
     
 public:
     /// Get the current frame's PGFF surprise score (for loop closing integration)
@@ -249,6 +255,9 @@ public:
         }
         return 0.0;
     }
+    
+    /// Get learned surprise prior for external access
+    pgff::LearnedSurprisePrior* GetSurprisePrior() { return surprise_prior_.get(); }
 };
 
 }  // namespace lightning

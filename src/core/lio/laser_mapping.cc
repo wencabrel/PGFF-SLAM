@@ -43,6 +43,15 @@ bool LaserMapping::Init(const std::string &config_yaml) {
         info_config.frontier_threshold = 0.7;  // High uncertainty = frontier
         info_frontier_ = std::make_unique<pgff::InformationFrontier>(info_config);
         LOG(INFO) << "Information Frontier initialized - predictive exploration enabled";
+        
+        // Initialize Learned Surprise Prior for adaptive thresholds (Option 4)
+        pgff::LearnedSurprisePrior::Config prior_config;
+        prior_config.region_size = 10.0;       // 10m spatial regions
+        prior_config.learning_rate = 0.1;      // Moderate learning rate
+        prior_config.novelty_bonus = 1.5;      // Boost novel regions
+        prior_config.dynamic_penalty = 0.5;    // Penalize dynamic regions
+        surprise_prior_ = std::make_unique<pgff::LearnedSurprisePrior>(prior_config);
+        LOG(INFO) << "Learned Surprise Prior initialized - adaptive thresholds enabled";
     }
 
     return true;
@@ -347,6 +356,9 @@ void LaserMapping::MakeKF() {
     
     // Update Information Frontier with current observation (Option 3)
     UpdateInformationFrontier();
+    
+    // Update Learned Surprise Prior with current frame (Option 4)
+    UpdateSurprisePrior();
 
     LOG(INFO) << "LIO: create kf " << kf->GetID() << ", state: " << state_point_.pos_.transpose()
               << ", kf opt pose: " << kf->GetOptPose().translation().transpose()
@@ -860,27 +872,41 @@ void LaserMapping::ComputePGFFWeights(int num_points) {
     // Track frame-level surprise for loop closing
     double total_surprise = 0.0;
     int surprise_count = 0;
+    int high_weight_count = 0;
     
     for (int i = 0; i < num_points; i++) {
         // Compute surprise from previous frame's residuals
-        // This works because geometry changes slowly between frames
         float predicted = (i < pgff_predicted_residuals_.size()) ? pgff_predicted_residuals_[i] : 0.0f;
         
-        // For now, use the current residuals_ array which will be populated
-        // during the parallel loop. We set default weight of 1.0 and adjust
-        // based on predicted residuals in subsequent iterations.
+        // Raw surprise based on predicted residuals
+        float raw_surprise = std::abs(predicted);
         
-        // Simple heuristic: points with larger predicted residuals are more "interesting"
-        float surprise = std::abs(predicted) * surprise_scale;
-        
-        // Sigmoid-like mapping to bound weights
-        float weight = 1.0f + std::tanh(surprise);
+        // Apply learned surprise prior for adaptive weighting (Option 4)
+        float weight = 1.0f;
+        if (surprise_prior_ && i < scan_down_body_->size()) {
+            const auto& pt = scan_down_body_->points[i];
+            Eigen::Vector3d world_pt = state_point_.rot_ * 
+                (state_point_.offset_R_lidar_ * pt.getVector3fMap().cast<double>() + 
+                 state_point_.offset_t_lidar_) + state_point_.pos_;
+            
+            // Get adaptive weight from learned prior
+            weight = static_cast<float>(surprise_prior_->GetAdaptiveWeight(
+                raw_surprise, world_pt, pgff::GeometryType::kUnknown));
+        } else {
+            // Fallback to simple heuristic
+            float surprise = raw_surprise * surprise_scale;
+            weight = 1.0f + std::tanh(surprise);
+        }
         
         // Clamp to valid range
         pgff_point_weights_[i] = std::clamp(weight, min_weight, max_weight);
         
+        if (pgff_point_weights_[i] > 1.5f) {
+            high_weight_count++;
+        }
+        
         // Accumulate frame surprise
-        total_surprise += std::abs(predicted);
+        total_surprise += raw_surprise;
         surprise_count++;
     }
     
@@ -889,6 +915,14 @@ void LaserMapping::ComputePGFFWeights(int num_points) {
         current_frame_surprise_ = total_surprise / surprise_count;
     } else {
         current_frame_surprise_ = 0.0;
+    }
+    
+    // Log PGFF stats periodically
+    if (frame_num_ % 20 == 0 && num_points > 0) {
+        LOG(INFO) << "[PGFF] Frame " << frame_num_ 
+                  << ": effect=" << num_points
+                  << " high_weight=" << high_weight_count
+                  << " surprise=" << std::setprecision(4) << current_frame_surprise_;
     }
 }
 
@@ -915,6 +949,68 @@ void LaserMapping::UpdateInformationFrontier() {
     
     // Store map uncertainty for UI
     current_map_uncertainty_ = 1.0 - stats.accuracy;  // Higher error = higher uncertainty
+}
+
+void LaserMapping::UpdateSurprisePrior() {
+    if (!surprise_prior_) return;
+    
+    // Batch update surprise prior with current scan data
+    // For efficiency, we sample a subset of points
+    
+    const int max_samples = 500;  // Limit samples for efficiency
+    int num_points = scan_down_body_->size();
+    int step = std::max(1, num_points / max_samples);
+    
+    std::vector<double> surprises;
+    std::vector<Eigen::Vector3d> positions;
+    std::vector<pgff::GeometryType> types;
+    
+    surprises.reserve(max_samples);
+    positions.reserve(max_samples);
+    types.reserve(max_samples);
+    
+    for (int i = 0; i < num_points; i += step) {
+        // Get point position in world frame
+        const auto& pt = scan_down_body_->points[i];
+        Eigen::Vector3d world_pt = state_point_.rot_ * 
+            (state_point_.offset_R_lidar_ * pt.getVector3fMap().cast<double>() + 
+             state_point_.offset_t_lidar_) + state_point_.pos_;
+        
+        // Get residual as surprise proxy
+        double surprise = 0.0;
+        if (i < residuals_.size()) {
+            surprise = std::abs(residuals_[i]);
+        }
+        
+        // Classify geometry from plane normal (simplified)
+        pgff::GeometryType geo_type = pgff::GeometryType::kUnknown;
+        if (i < plane_coef_.size()) {
+            Vec4f coef = plane_coef_[i];
+            Vec3f normal(coef[0], coef[1], coef[2]);
+            
+            // Simple classification based on normal direction
+            float z_component = std::abs(normal.z());
+            float xy_component = std::sqrt(normal.x()*normal.x() + normal.y()*normal.y());
+            
+            if (z_component > 0.8f) {
+                geo_type = pgff::GeometryType::kPlanar;  // Floor/ceiling
+            } else if (xy_component > 0.8f) {
+                geo_type = pgff::GeometryType::kPlanar;  // Wall
+            } else {
+                geo_type = pgff::GeometryType::kCorner;  // Transition
+            }
+        }
+        
+        surprises.push_back(surprise);
+        positions.push_back(world_pt);
+        types.push_back(geo_type);
+    }
+    
+    // Batch update the prior
+    surprise_prior_->UpdateBatch(surprises, positions, types);
+    
+    // Log learning progress periodically
+    surprise_prior_->LogLearningProgress(frame_num_);
 }
 
 }  // namespace lightning

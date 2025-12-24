@@ -19,6 +19,9 @@
 // Predictive Information (Option 3)
 #include "core/pgff/information_frontier.h"
 
+// Learned Surprise Prior (Option 4)
+#include "core/pgff/surprise_prior.h"
+
 namespace lightning {
 namespace pgff {
 
