@@ -69,6 +69,7 @@ void PangolinWindow::UpdateNavState(const NavState& state) {
     impl_->pgff_surprise_ = state.pgff_surprise_;
     impl_->opt_residual_ = state.opt_residual_;
     impl_->map_uncertainty_ = state.map_uncertainty_;
+    impl_->info_frontier_accuracy_ = state.info_frontier_accuracy_;
 
     impl_->kf_result_need_update_.store(true);
 }

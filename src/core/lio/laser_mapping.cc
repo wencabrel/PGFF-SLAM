@@ -176,6 +176,7 @@ void LaserMapping::ProcessIMU(const lightning::IMUPtr &imu) {
             // Compute map uncertainty from ESKF covariance
             auto P = kf_.GetP();
             nav_state.map_uncertainty_ = std::sqrt(P(0,0) + P(1,1) + P(2,2));
+            nav_state.info_frontier_accuracy_ = current_info_accuracy_;
             ui_->UpdateNavState(nav_state);
         }
     }
@@ -229,6 +230,7 @@ bool LaserMapping::Run() {
                 // Compute map uncertainty from ESKF covariance
                 auto P = kf_.GetP();
                 nav_state.map_uncertainty_ = std::sqrt(P(0,0) + P(1,1) + P(2,2));
+                nav_state.info_frontier_accuracy_ = current_info_accuracy_;
                 ui_->UpdateNavState(nav_state);
                 ui_->UpdateScan(scan_undistort_, kf_.GetX().GetPose());
             }
@@ -352,7 +354,19 @@ void LaserMapping::MakeKF() {
     // Use trace of position covariance (first 3x3 block) as uncertainty metric
     auto P = kf_.GetP();
     double pos_uncertainty = std::sqrt(P(0,0) + P(1,1) + P(2,2));  // sqrt of trace
+    double pos_x_uncertainty = std::sqrt(P(0,0));  // X uncertainty
+    double pos_y_uncertainty = std::sqrt(P(1,1));  // Y uncertainty  
+    double pos_z_uncertainty = std::sqrt(P(2,2));  // Z uncertainty
     kf->SetPoseUncertainty(pos_uncertainty);
+    
+    // Print detailed uncertainty tracking over time
+    LOG(INFO) << "[UNCERTAINTY] KF=" << kf->GetID() 
+              << " time=" << std::fixed << std::setprecision(2) << state_point_.timestamp_
+              << " total=" << std::setprecision(6) << pos_uncertainty << "m"
+              << " X=" << pos_x_uncertainty << "m"
+              << " Y=" << pos_y_uncertainty << "m"
+              << " Z=" << pos_z_uncertainty << "m"
+              << " distance=" << state_point_.pos_.norm() << "m";
     
     // Update Information Frontier with current observation (Option 3)
     UpdateInformationFrontier();
@@ -946,6 +960,9 @@ void LaserMapping::UpdateInformationFrontier() {
                   << " pred_accuracy=" << std::setprecision(3) << stats.accuracy * 100 << "%"
                   << " pred_err=" << stats.mean_error;
     }
+    
+    // Store info frontier accuracy for UI
+    current_info_accuracy_ = stats.accuracy;
     
     // Store map uncertainty for UI
     current_map_uncertainty_ = 1.0 - stats.accuracy;  // Higher error = higher uncertainty

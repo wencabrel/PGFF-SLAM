@@ -35,6 +35,8 @@ bool PangolinWindowImpl::Init() {
     // PGFF metrics - more useful than generic confidence in SLAM mode
     log_confidence_.SetLabels(std::vector<std::string>{"PGFF Surprise"});
     log_error_.SetLabels(std::vector<std::string>{"Residual", "Uncertainty"});
+    log_uncertainty_.SetLabels(std::vector<std::string>{"Pos_Uncertainty"});
+    log_info_frontier_.SetLabels(std::vector<std::string>{"Info_Accuracy"});
 
     return true;
 }
@@ -180,10 +182,32 @@ bool PangolinWindowImpl::UpdateState() {
     log_vel_baselink_.Log(vel_baselink(0), vel_baselink(1), vel_baselink(2));
     // Log PGFF metrics - surprise indicates novelty, residual indicates registration quality
     log_confidence_.Log(pgff_surprise_ * 100.0);  // Scale to percentage for better visibility
-    log_error_.Log(opt_residual_, map_uncertainty_);  // Residual and uncertainty together
+    // Scale uncertainty to 0-1 range (50m max) for better visualization
+    double scaled_uncertainty = std::min(1.0, map_uncertainty_ / 50.0);
+    log_error_.Log(opt_residual_, scaled_uncertainty);  // Residual and uncertainty together
 
     newest_frontend_pose_ = pose_;
     traj_newest_state_->AddPt(newest_frontend_pose_);
+    
+    // Update statistics
+    {
+        std::lock_guard<std::mutex> kf_lock(mtx_current_scan_);
+        keyframe_count_ = static_cast<int>(all_keyframes_.size());
+        
+        // Calculate total distance
+        if (all_keyframes_.size() > 1) {
+            double dist = 0.0;
+            for (size_t i = 1; i < all_keyframes_.size(); ++i) {
+                auto p1 = all_keyframes_[i-1]->GetOptPose().translation();
+                auto p2 = all_keyframes_[i]->GetOptPose().translation();
+                dist += (p2 - p1).norm();
+            }
+            total_distance_ = dist;
+        }
+        
+        // Count loop closures from loop_info_
+        loop_closure_count_ = static_cast<int>(loop_info_.size());
+    }
 
     kf_result_need_update_.store(false);
     return false;
@@ -202,23 +226,30 @@ void PangolinWindowImpl::DrawAll() {
 
     /// 缓存的scans
     for (const auto &s : scans_) {
-        s->Render();
+        if (s) s->Render();
     }
 
-    current_scan_ui_->Render();
+    // Only render current scan if it exists and has points
+    if (current_scan_ui_ && current_scan_ui_->HasPoints()) {
+        current_scan_ui_->Render();
+    }
 
     if (draw_frontend_traj_) {
         traj_newest_state_->Render();
-        // 车
-        frontend_car_.SetPose(newest_frontend_pose_);  // 车在current pose上
-        frontend_car_.Render();
+        // Only render car if pose has been set (not at origin)
+        if (newest_frontend_pose_.translation().norm() > 0.1) {
+            frontend_car_.SetPose(newest_frontend_pose_);
+            frontend_car_.Render();
+        }
     }
 
     if (draw_backend_traj_) {
         traj_scans_->Render();
-        // 车
-        backend_car_.SetPose(newest_backend_pose_);
-        backend_car_.Render();
+        // Only render car if pose has been set (not at origin)
+        if (newest_backend_pose_.translation().norm() > 0.1) {
+            backend_car_.SetPose(newest_backend_pose_);
+            backend_car_.Render();
+        }
     }
 
     // 关键帧
@@ -246,6 +277,62 @@ void PangolinWindowImpl::DrawAll() {
 
     // 文字
     RenderLabels();
+    
+    // Draw loop closures as connecting lines
+    DrawLoopClosures();
+}
+
+void PangolinWindowImpl::DrawLoopClosures() {
+    UL lock(mtx_current_scan_);
+    
+    if (loop_info_.empty() || all_keyframes_.empty()) {
+        return;
+    }
+    
+    // Draw loop closure connections as bright cyan lines
+    glLineWidth(3.0);
+    glBegin(GL_LINES);
+    glColor4f(0.0, 0.95, 0.95, 0.8);  // Bright cyan with some transparency
+    
+    for (const auto& loop : loop_info_) {
+        int kf1_id = loop.first;
+        int kf2_id = loop.second;
+        
+        // Find the keyframes
+        if (kf1_id < static_cast<int>(all_keyframes_.size()) && 
+            kf2_id < static_cast<int>(all_keyframes_.size())) {
+            auto p1 = all_keyframes_[kf1_id]->GetOptPose().translation();
+            auto p2 = all_keyframes_[kf2_id]->GetOptPose().translation();
+            
+            // Draw line connecting the two loop closure keyframes
+            glVertex3f(p1[0], p1[1], p1[2]);
+            glVertex3f(p2[0], p2[1], p2[2]);
+        }
+    }
+    
+    glEnd();
+    
+    // Draw small spheres at loop closure locations
+    glPointSize(8.0);
+    glBegin(GL_POINTS);
+    glColor4f(1.0, 0.84, 0.0, 1.0);  // Gold color for loop closure points
+    
+    for (const auto& loop : loop_info_) {
+        int kf1_id = loop.first;
+        int kf2_id = loop.second;
+        
+        if (kf1_id < static_cast<int>(all_keyframes_.size())) {
+            auto p1 = all_keyframes_[kf1_id]->GetOptPose().translation();
+            glVertex3f(p1[0], p1[1], p1[2]);
+        }
+        if (kf2_id < static_cast<int>(all_keyframes_.size())) {
+            auto p2 = all_keyframes_[kf2_id]->GetOptPose().translation();
+            glVertex3f(p2[0], p2[1], p2[2]);
+        }
+    }
+    
+    glEnd();
+    glPointSize(1.0);  // Reset
 }
 
 void PangolinWindowImpl::RenderClouds() {
@@ -290,6 +377,197 @@ void PangolinWindowImpl::RenderLabels() {
     glPopMatrix();
     glMatrixMode(GL_MODELVIEW);
     glPopMatrix();
+    
+    // Render PGFF status in top-right corner
+    RenderPGFFStatus();
+    
+    // Minimap disabled - uncomment to enable
+    // RenderMinimap();
+}
+
+void PangolinWindowImpl::RenderPGFFStatus() {
+    // Use the 3D view container for correct bounds
+    auto &d_cam3d = pangolin::Display(dis_3d_name_);
+    const auto cur_width = d_cam3d.v.w;
+    const auto cur_height = d_cam3d.v.h;
+    
+    // Don't render if view is too small
+    if (cur_width < 200 || cur_height < 100) return;
+    
+    // Activate the view
+    d_cam3d.Activate();
+
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glOrtho(0, cur_width, 0, cur_height, -1, 1);
+
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    auto &font = pangolin::default_font();
+    
+    // Status panel in top-right of the 3D view area (not overlapping with plots)
+    char status_buf[512];
+    snprintf(status_buf, sizeof(status_buf),
+             "PGFF Status: %s\n"
+             "Surprise: %.3f | Uncertainty: %.2fm\n"
+             "KF: %d | Loops: %d | Dist: %.1fm",
+             pgff_enabled_ ? "ACTIVE" : "OFF",
+             pgff_surprise_,
+             map_uncertainty_,
+             keyframe_count_,
+             loop_closure_count_,
+             total_distance_);
+    
+    pangolin::GlText status_text = font.Text(status_buf);
+    
+    // Position in top-right corner with padding (keep away from right edge)
+    float text_x = cur_width - status_text.Width() - 20;
+    float text_y = cur_height - 20;
+    
+    // Clamp position to avoid going outside view
+    if (text_x < 10) text_x = 10;
+    
+    // Draw semi-transparent background
+    glColor4f(0.1, 0.1, 0.2, 0.7);
+    glBegin(GL_QUADS);
+    glVertex2f(text_x - 5, text_y - status_text.Height() - 5);
+    glVertex2f(cur_width - 10, text_y - status_text.Height() - 5);
+    glVertex2f(cur_width - 10, text_y + 10);
+    glVertex2f(text_x - 5, text_y + 10);
+    glEnd();
+    
+    // Draw text
+    glTranslatef(text_x, text_y - status_text.Height() + 10, 1.0);
+    if (pgff_enabled_) {
+        glColor3f(0.3, 0.9, 0.4);  // Green when active
+    } else {
+        glColor3f(0.9, 0.3, 0.3);  // Red when inactive
+    }
+    status_text.Draw();
+
+    // Restore matrices
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+    glPopMatrix();
+}
+
+void PangolinWindowImpl::RenderStatsPanel() {
+    // Stats are now shown in menu panel, this is for additional overlay if needed
+}
+
+void PangolinWindowImpl::RenderMinimap() {
+    // Top-down minimap in bottom-right corner of the 3D view area
+    // Use the actual 3D view container (d_cam3d) which has the correct bounds
+    auto &d_cam3d = pangolin::Display(dis_3d_name_);
+    const auto cur_width = d_cam3d.v.w;
+    const auto cur_height = d_cam3d.v.h;
+    
+    // Don't render if view is too small
+    if (cur_width < 200 || cur_height < 200) return;
+    
+    // Minimap dimensions - position inside the 3D view area
+    const float map_size = 150;
+    const float map_x = cur_width - map_size - 30;  // More padding from right edge
+    const float map_y = 20;
+    
+    // Activate the 3D view for correct coordinate system
+    d_cam3d.Activate();
+    
+    // Save current state
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glOrtho(0, cur_width, 0, cur_height, -1, 1);
+    
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+    
+    // Draw minimap background
+    glColor4f(0.1, 0.15, 0.25, 0.8);
+    glBegin(GL_QUADS);
+    glVertex2f(map_x, map_y);
+    glVertex2f(map_x + map_size, map_y);
+    glVertex2f(map_x + map_size, map_y + map_size);
+    glVertex2f(map_x, map_y + map_size);
+    glEnd();
+    
+    // Draw border
+    glColor3f(0.4, 0.5, 0.6);
+    glLineWidth(2.0);
+    glBegin(GL_LINE_LOOP);
+    glVertex2f(map_x, map_y);
+    glVertex2f(map_x + map_size, map_y);
+    glVertex2f(map_x + map_size, map_y + map_size);
+    glVertex2f(map_x, map_y + map_size);
+    glEnd();
+    
+    // Draw trajectory on minimap
+    {
+        UL lock(mtx_current_scan_);
+        if (all_keyframes_.size() > 1) {
+            // Calculate bounds
+            double min_x = 1e9, max_x = -1e9, min_y = 1e9, max_y = -1e9;
+            for (const auto& kf : all_keyframes_) {
+                auto p = kf->GetOptPose().translation();
+                min_x = std::min(min_x, p[0]);
+                max_x = std::max(max_x, p[0]);
+                min_y = std::min(min_y, p[1]);
+                max_y = std::max(max_y, p[1]);
+            }
+            
+            double range_x = std::max(max_x - min_x, 1.0);
+            double range_y = std::max(max_y - min_y, 1.0);
+            double scale = (map_size - 20) / std::max(range_x, range_y);
+            
+            // Draw trajectory line
+            glLineWidth(1.5);
+            glBegin(GL_LINE_STRIP);
+            glColor3f(0.73, 0.33, 0.83);  // Purple
+            for (const auto& kf : all_keyframes_) {
+                auto p = kf->GetOptPose().translation();
+                float px = map_x + 10 + (p[0] - min_x) * scale;
+                float py = map_y + 10 + (p[1] - min_y) * scale;
+                glVertex2f(px, py);
+            }
+            glEnd();
+            
+            // Draw current position dot
+            if (!all_keyframes_.empty()) {
+                auto p = all_keyframes_.back()->GetOptPose().translation();
+                float px = map_x + 10 + (p[0] - min_x) * scale;
+                float py = map_y + 10 + (p[1] - min_y) * scale;
+                
+                glPointSize(6.0);
+                glBegin(GL_POINTS);
+                glColor3f(0.0, 1.0, 0.5);  // Bright green
+                glVertex2f(px, py);
+                glEnd();
+                glPointSize(1.0);
+            }
+        }
+    }
+    
+    // Draw "MINIMAP" label
+    auto &font = pangolin::default_font();
+    pangolin::GlText label = font.Text("MINIMAP");
+    glColor3f(0.7, 0.7, 0.8);
+    glTranslatef(map_x + 5, map_y + map_size - 15, 0);
+    label.Draw();
+    
+    // Restore
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+    glPopMatrix();
+}
+
+void PangolinWindowImpl::RenderProgressBar() {
+    // Future: Progress bar for offline processing
 }
 
 void PangolinWindowImpl::CreateDisplayLayout() {
@@ -321,7 +599,7 @@ void PangolinWindowImpl::CreateDisplayLayout() {
     plotter_confidence_ = std::make_unique<pangolin::Plotter>(&log_confidence_, -10, 600, 0, 5.0, 100, 0.5);
     plotter_confidence_->SetBounds(0.02, 0.98, 0.0, 1.0);
     plotter_confidence_->Track("$i");
-    plotter_err_ = std::make_unique<pangolin::Plotter>(&log_error_, -10, 600, 0, 1.0, 100, 0.1);
+    plotter_err_ = std::make_unique<pangolin::Plotter>(&log_error_, -10, 600, 0, 2.0, 100, 0.2);
     plotter_err_->SetBounds(0.02, 0.98, 0.0, 1.0);
     plotter_err_->Track("$i");
 
@@ -349,21 +627,53 @@ void PangolinWindowImpl::Render() {
     // menu - Create a clean, organized control panel
     pangolin::CreatePanel("menu").SetBounds(0.0, 1.0, 0.0, pangolin::Attach::Pix(menu_width_));
     
+    // === HEADER ===
+    pangolin::Var<std::string> menu_header("menu.═══ LIGHTNING SLAM ═══", "");
+    
     // === View Controls ===
+    pangolin::Var<std::string> menu_view_section("menu.── View Controls ──", "");
     pangolin::Var<bool> menu_follow_loc("menu.Follow Robot", false, true);                 // 跟踪实时定位
-    pangolin::Var<bool> menu_draw_frontend_traj("menu.Show Frontend (Red)", true, true);   // 前端实时轨迹
-    pangolin::Var<bool> menu_draw_backend_traj("menu.Show Backend (Green)", false, true);  // 后端实时轨迹
+    pangolin::Var<bool> menu_draw_frontend_traj("menu.Frontend Traj (Red)", true, true);   // 前端实时轨迹
+    pangolin::Var<bool> menu_draw_backend_traj("menu.Backend Traj (Green)", false, true);  // 后端实时轨迹
+    pangolin::Var<bool> menu_draw_loop_closures("menu.Loop Closures", true, true);         // 显示回环
     
     // === Camera Presets ===
+    pangolin::Var<std::string> menu_cam_section("menu.── Camera Presets ──", "");
     pangolin::Var<bool> menu_reset_3d_view("menu.Top-Down View", false, false);            // 重置俯视视角
     pangolin::Var<bool> menu_reset_front_view("menu.Side View", false, false);             // 前视视角
+    pangolin::Var<bool> menu_reset_follow_view("menu.Follow View", false, false);          // 跟随视角
+    
+    // === PGFF Controls ===
+    pangolin::Var<std::string> menu_pgff_section("menu.── PGFF Modules ──", "");
+    pangolin::Var<bool> menu_pgff_enabled("menu.PGFF Enabled", true, true);
+    pangolin::Var<bool> menu_uncertainty_map("menu.  Uncertainty Map", true, true);
+    pangolin::Var<bool> menu_multi_hyp_lc("menu.  Multi-Hyp LC", true, true);
+    pangolin::Var<bool> menu_info_frontier("menu.  Info Frontier", true, true);
+    pangolin::Var<bool> menu_surprise_prior("menu.  Surprise Prior", true, true);
+    
+    // === Statistics Display ===
+    pangolin::Var<std::string> menu_stats_section("menu.── Statistics ──", "");
+    pangolin::Var<int> menu_kf_count("menu.Keyframes", 0);
+    pangolin::Var<int> menu_loop_count("menu.Loop Closures", 0);
+    pangolin::Var<double> menu_distance("menu.Distance (m)", 0.0);
+    pangolin::Var<double> menu_fps("menu.FPS", 0.0);
+    
+    // === PGFF Metrics ===
+    pangolin::Var<std::string> menu_metrics_section("menu.── PGFF Metrics ──", "");
+    pangolin::Var<double> menu_surprise("menu.Surprise", 0.0);
+    pangolin::Var<double> menu_uncertainty("menu.Uncertainty (m)", 0.0);
+    pangolin::Var<double> menu_info_acc("menu.Info Accuracy (%)", 0.0);
+    pangolin::Var<int> menu_active_hyp("menu.Active Hypotheses", 0);
     
     // === Playback ===
+    pangolin::Var<std::string> menu_play_section("menu.── Playback ──", "");
     pangolin::Var<bool> menu_step("menu.Step Mode", false, false);                         // 单步调试
-    pangolin::Var<float> menu_play_speed("menu.Playback Speed", 10.0, 0.1, 10.0);          // 运行速度
+    pangolin::Var<float> menu_play_speed("menu.Speed", 10.0, 0.1, 10.0);                   // 运行速度
     
     // === Display Settings ===
+    pangolin::Var<std::string> menu_display_section("menu.── Display ──", "");
     pangolin::Var<float> menu_intensity("menu.Point Opacity", 0.7, 0.1, 1.0);              // 亮度
+    pangolin::Var<float> menu_point_size("menu.Point Size", 1.0, 0.5, 5.0);                // 点大小
 
     // display layout
     CreateDisplayLayout();
@@ -380,6 +690,25 @@ void PangolinWindowImpl::Render() {
         following_loc_ = menu_follow_loc;
         draw_frontend_traj_ = menu_draw_frontend_traj;
         draw_backend_traj_ = menu_draw_backend_traj;
+        
+        // PGFF module toggles
+        pgff_enabled_ = menu_pgff_enabled;
+        uncertainty_mapping_enabled_ = menu_uncertainty_map;
+        multi_hyp_lc_enabled_ = menu_multi_hyp_lc;
+        info_frontier_enabled_ = menu_info_frontier;
+        surprise_prior_enabled_ = menu_surprise_prior;
+        
+        // Update statistics display
+        menu_kf_count = keyframe_count_;
+        menu_loop_count = loop_closure_count_;
+        menu_distance = total_distance_;
+        menu_fps = processing_fps_;
+        
+        // Update PGFF metrics display
+        menu_surprise = pgff_surprise_;
+        menu_uncertainty = map_uncertainty_;
+        menu_info_acc = info_frontier_accuracy_ * 100.0;
+        menu_active_hyp = active_hypotheses_;
 
         if (menu_reset_3d_view) {
             s_cam_main_.SetModelViewMatrix(pangolin::ModelViewLookAt(0, 0, 1000, 0, 0, 0, pangolin::AxisY));
@@ -389,6 +718,12 @@ void PangolinWindowImpl::Render() {
         if (menu_reset_front_view) {
             s_cam_main_.SetModelViewMatrix(pangolin::ModelViewLookAt(-50, 0, 10, 50, 0, 10, pangolin::AxisZ));
             menu_reset_front_view = false;
+        }
+        
+        if (menu_reset_follow_view) {
+            following_loc_ = true;
+            menu_follow_loc = true;
+            menu_reset_follow_view = false;
         }
 
         if (menu_step) {

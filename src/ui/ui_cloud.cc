@@ -114,7 +114,7 @@ void UiCloud::Render() {
             glColor4f(color_data_gray_[i][0], color_data_gray_[i][1], color_data_gray_[i][2], ui::opacity);
         } else if (use_color_ == UseColor::UNCERTAINTY_COLOR) {
             glColor4f(color_data_uncertainty_[i][0], color_data_uncertainty_[i][1], color_data_uncertainty_[i][2], ui::opacity);
-        } else if (use_color_ = UseColor::CUSTOM_COLOR) {
+        } else if (use_color_ == UseColor::CUSTOM_COLOR) {
             glColor4f(custom_color_[0], custom_color_[1], custom_color_[2], ui::opacity);
         }
 

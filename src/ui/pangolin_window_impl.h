@@ -95,6 +95,21 @@ class PangolinWindowImpl {
     double pgff_surprise_ = 0.0;   // Frame surprise score
     double opt_residual_ = 0.0;    // Optimization residual
     double map_uncertainty_ = 0.0; // Map uncertainty from ESKF covariance
+    
+    // Enhanced UI statistics
+    int keyframe_count_ = 0;           // Total keyframes
+    int loop_closure_count_ = 0;       // Successful loop closures
+    double total_distance_ = 0.0;      // Total distance traveled (m)
+    double processing_fps_ = 0.0;      // Processing frame rate
+    int active_hypotheses_ = 0;        // Active loop hypotheses
+    double info_frontier_accuracy_ = 0.0;  // Info frontier prediction accuracy
+    
+    // PGFF module states (for UI toggles)
+    bool pgff_enabled_ = true;
+    bool uncertainty_mapping_enabled_ = true;
+    bool multi_hyp_lc_enabled_ = true;
+    bool info_frontier_enabled_ = true;
+    bool surprise_prior_enabled_ = true;
 
     Sophus::SE3d T_imu_lidar_;
     int max_size_of_current_scan_ = 200;  // 当前扫描数据保留多少个
@@ -140,9 +155,12 @@ class PangolinWindowImpl {
 
     // text
     pangolin::GlText gltext_label_global_;
+    pangolin::GlText gltext_stats_;        // Statistics text
+    pangolin::GlText gltext_pgff_status_;  // PGFF status text
 
     // camera
     pangolin::OpenGlRenderState s_cam_main_;
+    pangolin::OpenGlRenderState s_cam_minimap_;  // Minimap camera
 
     /// cloud rendering
     ui::UiCar backend_car_{Vec3f(0.34, 0.82, 0.50)};            // Emerald green - Backend
@@ -168,6 +186,18 @@ class PangolinWindowImpl {
     std::unique_ptr<pangolin::Plotter> plotter_confidence_ = nullptr;
     std::unique_ptr<pangolin::Plotter> plotter_err_ = nullptr;
     std::unique_ptr<pangolin::Plotter> plotter_err_eval_ = nullptr;
+    
+    // Enhanced UI - additional plots
+    pangolin::DataLog log_uncertainty_;     // Uncertainty over time
+    pangolin::DataLog log_info_frontier_;   // Info frontier metrics
+    std::unique_ptr<pangolin::Plotter> plotter_uncertainty_ = nullptr;
+    
+    // Rendering helpers
+    void RenderStatsPanel();      // Render statistics overlay
+    void RenderPGFFStatus();      // Render PGFF module status
+    void RenderMinimap();         // Render minimap
+    void RenderProgressBar();     // Render progress bar
+    void DrawLoopClosures();      // Visualize loop closures
 };
 
 }  // namespace lightning::ui

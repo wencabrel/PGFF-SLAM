@@ -225,6 +225,7 @@ class LaserMapping {
     std::unique_ptr<pgff::InformationFrontier> info_frontier_ = nullptr;
     double current_predicted_surprise_ = 0.0;  // Predicted surprise before observation
     double current_map_uncertainty_ = 0.0;     // Current map/pose uncertainty for UI
+    double current_info_accuracy_ = 0.0;       // Info frontier prediction accuracy for UI
     
     /// Learned Surprise Prior - Adaptive threshold learning (Option 4)
     std::unique_ptr<pgff::LearnedSurprisePrior> surprise_prior_ = nullptr;

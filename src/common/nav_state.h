@@ -192,6 +192,7 @@ struct NavState {
     double pgff_surprise_ = 0.0;       // PGFF surprise score (0-1, higher = more novel)
     double opt_residual_ = 0.0;        // Optimization residual (point-to-plane error)
     double map_uncertainty_ = 0.0;     // Map uncertainty from ESKF covariance (sqrt of position trace)
+    double info_frontier_accuracy_ = 0.0;  // Info frontier prediction accuracy (0-1)
 
     Vec3d pos_ = Vec3d::Zero();             // 位置
     SO3 rot_;                               // 旋转

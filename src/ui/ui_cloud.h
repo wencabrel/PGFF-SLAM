@@ -45,6 +45,9 @@ class UiCloud {
 
     /// 指定自选颜色，RGBA
     void SetCustomColor(Vec4f custom_color);
+    
+    /// Check if cloud has any points
+    bool HasPoints() const { return !xyz_data_.empty(); }
 
    private:
     Vec4f IntensityToRgbPCL(const float& intensity) const {
