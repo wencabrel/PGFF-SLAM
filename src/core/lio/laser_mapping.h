@@ -221,8 +221,16 @@ class LaserMapping {
     double current_frame_surprise_ = 0.0;    // Current frame's surprise score
     double current_pose_uncertainty_ = 0.0;  // Current pose uncertainty from ESKF covariance
     
+    /// Information Frontier - Predictive Information (Option 3)
+    std::unique_ptr<pgff::InformationFrontier> info_frontier_ = nullptr;
+    double current_predicted_surprise_ = 0.0;  // Predicted surprise before observation
+    double current_map_uncertainty_ = 0.0;     // Current map/pose uncertainty for UI
+    
     /// Compute PGFF weights based on surprise scores
     void ComputePGFFWeights(int num_points);
+    
+    /// Update information frontier with current observation
+    void UpdateInformationFrontier();
     
 public:
     /// Get the current frame's PGFF surprise score (for loop closing integration)
@@ -230,6 +238,17 @@ public:
     
     /// Check if PGFF is enabled and active
     bool IsPGFFEnabled() const { return options_.enable_pgff_ && pgff_ && pgff_->IsEnabled(); }
+    
+    /// Get information frontier for exploration guidance
+    pgff::InformationFrontier* GetInfoFrontier() { return info_frontier_.get(); }
+    
+    /// Get prediction accuracy (how well we predict surprise)
+    double GetPredictionAccuracy() const {
+        if (info_frontier_) {
+            return info_frontier_->GetPredictionStats().accuracy;
+        }
+        return 0.0;
+    }
 };
 
 }  // namespace lightning

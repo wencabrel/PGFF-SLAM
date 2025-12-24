@@ -16,6 +16,9 @@
 #include "core/pgff/enhanced_obs_model.h"
 #include "core/pgff/surprise_loop_detector.h"
 
+// Predictive Information (Option 3)
+#include "core/pgff/information_frontier.h"
+
 namespace lightning {
 namespace pgff {
 

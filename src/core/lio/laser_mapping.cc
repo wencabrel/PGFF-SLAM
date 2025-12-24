@@ -35,6 +35,14 @@ bool LaserMapping::Init(const std::string &config_yaml) {
         pgff_ = std::make_unique<pgff::PredictiveLIO>(pgff::CreateDefaultPGFF());
         pgff_->SetEnabled(true);
         LOG(INFO) << "PGFF initialized - selective point processing enabled";
+        
+        // Initialize Information Frontier for predictive information (Option 3)
+        pgff::InformationFrontier::Config info_config;
+        info_config.cell_size = 5.0;           // 5m grid cells
+        info_config.prediction_horizon = 10;   // Predict 10 cells ahead
+        info_config.frontier_threshold = 0.7;  // High uncertainty = frontier
+        info_frontier_ = std::make_unique<pgff::InformationFrontier>(info_config);
+        LOG(INFO) << "Information Frontier initialized - predictive exploration enabled";
     }
 
     return true;
@@ -336,6 +344,9 @@ void LaserMapping::MakeKF() {
     auto P = kf_.GetP();
     double pos_uncertainty = std::sqrt(P(0,0) + P(1,1) + P(2,2));  // sqrt of trace
     kf->SetPoseUncertainty(pos_uncertainty);
+    
+    // Update Information Frontier with current observation (Option 3)
+    UpdateInformationFrontier();
 
     LOG(INFO) << "LIO: create kf " << kf->GetID() << ", state: " << state_point_.pos_.transpose()
               << ", kf opt pose: " << kf->GetOptPose().translation().transpose()
@@ -879,6 +890,31 @@ void LaserMapping::ComputePGFFWeights(int num_points) {
     } else {
         current_frame_surprise_ = 0.0;
     }
+}
+
+void LaserMapping::UpdateInformationFrontier() {
+    if (!info_frontier_) return;
+    
+    // Get predicted surprise before updating (for validation)
+    current_predicted_surprise_ = info_frontier_->GetPredictedSurprise(state_point_.pos_);
+    
+    // Update frontier with actual observation
+    info_frontier_->Update(state_point_.pos_, kf_id_, current_frame_surprise_);
+    
+    // Get prediction statistics
+    auto stats = info_frontier_->GetPredictionStats();
+    
+    // Log periodically (every 10 keyframes)
+    if (kf_id_ % 10 == 0 && stats.num_predictions > 0) {
+        LOG(INFO) << "[InfoFrontier] KF " << kf_id_ 
+                  << " cells=" << info_frontier_->GetCellCount()
+                  << " frontiers=" << info_frontier_->GetFrontierCount()
+                  << " pred_accuracy=" << std::setprecision(3) << stats.accuracy * 100 << "%"
+                  << " pred_err=" << stats.mean_error;
+    }
+    
+    // Store map uncertainty for UI
+    current_map_uncertainty_ = 1.0 - stats.accuracy;  // Higher error = higher uncertainty
 }
 
 }  // namespace lightning
