@@ -223,9 +223,8 @@ void PangolinWindowImpl::UpdatePersistentMapLOD() {
             const auto& pt = cloud->points[i];
             lod.local_points.push_back(Vec3f(pt.x, pt.y, pt.z));
             
-            // Height-based coloring (similar to HEIGHT_COLOR)
-            float h = std::clamp((pt.z + 2.0f) / 6.0f, 0.0f, 1.0f);  // Normalize height
-            lod.colors.push_back(Vec4f(0.3f + 0.4f * h, 0.5f + 0.3f * (1.0f - h), 0.7f - 0.3f * h, 0.7f));
+            // Simple white/gray color for all points
+            lod.colors.push_back(Vec4f(0.8f, 0.8f, 0.8f, 0.85f));
         }
         
         // Store in persistent map
