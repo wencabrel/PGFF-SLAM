@@ -47,6 +47,12 @@ class PangolinWindow {
     void UpdateScan(CloudPtr cloud, const SE3& pose);
 
     void UpdateKF(std::shared_ptr<Keyframe> kf);
+    
+    /// Update loop closing statistics
+    void UpdateLoopClosingStats(int active_hypotheses);
+    
+    /// Notify UI of a new loop closure
+    void UpdateLoopClosure(int idx1, int idx2);
 
     /// 等待显示线程结束，并释放资源
     void Quit();

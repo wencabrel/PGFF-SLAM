@@ -122,6 +122,17 @@ void PangolinWindow::UpdateKF(std::shared_ptr<Keyframe> kf) {
     impl_->all_keyframes_.emplace_back(kf);
 }
 
+void PangolinWindow::UpdateLoopClosingStats(int active_hypotheses) {
+    if (!impl_->ui_available_.load()) return;
+    impl_->active_hypotheses_ = active_hypotheses;
+}
+
+void PangolinWindow::UpdateLoopClosure(int idx1, int idx2) {
+    if (!impl_->ui_available_.load()) return;
+    std::unique_lock<std::mutex> lock(impl_->mtx_loop_info_);
+    impl_->loop_info_.emplace_back(idx1, idx2);
+}
+
 void PangolinWindow::SetCurrentScanSize(int current_scan_size) { impl_->max_size_of_current_scan_ = current_scan_size; }
 
 void PangolinWindow::SetTImuLidar(const SE3& T_imu_lidar) { impl_->T_imu_lidar_ = T_imu_lidar; }

@@ -71,6 +71,18 @@ class LoopClosing {
     /// 如果检测到新地回环并发生了优化，则调用回调
     using LoopClosedCallback = std::function<void()>;
     void SetLoopClosedCB(LoopClosedCallback cb) { loop_cb_ = cb; }
+    
+    /// Callback when a new loop closure is added
+    using LoopAddedCallback = std::function<void(int, int)>;
+    void SetLoopAddedCB(LoopAddedCallback cb) { loop_added_cb_ = cb; }
+    
+    /// Get active hypotheses count for UI display
+    int GetActiveHypothesesCount() const {
+        if (hypothesis_manager_) {
+            return hypothesis_manager_->GetActiveCount();
+        }
+        return 0;
+    }
 
    protected:
     void HandleKF(Keyframe::Ptr kf);
@@ -112,6 +124,10 @@ class LoopClosing {
     std::vector<std::shared_ptr<miao::EdgeSE3>> edge_loops_;
 
     LoopClosedCallback loop_cb_;
+    LoopAddedCallback loop_added_cb_;
+    
+    // Track which loops have been notified to UI (to avoid duplicates)
+    std::set<std::pair<int, int>> notified_loops_;
     
     // PGFF surprise tracking for loop detection
     double last_frame_surprise_ = 0.0;

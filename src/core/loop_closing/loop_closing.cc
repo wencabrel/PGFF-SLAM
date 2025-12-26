@@ -445,6 +445,15 @@ void LoopClosing::PoseOptimization() {
 
         optimizer_->AddEdge(e);
         edge_loops_.emplace_back(e);
+        
+        // Notify UI of new loop closure (only if not already notified)
+        if (loop_added_cb_) {
+            auto loop_pair = std::make_pair(std::min(c.idx1_, c.idx2_), std::max(c.idx1_, c.idx2_));
+            if (notified_loops_.find(loop_pair) == notified_loops_.end()) {
+                notified_loops_.insert(loop_pair);
+                loop_added_cb_(c.idx1_, c.idx2_);
+            }
+        }
     }
 
     if (optimizer_->GetEdges().empty()) {

@@ -61,6 +61,11 @@ bool SlamSystem::Init(const std::string& yaml_path) {
         if (options_.with_loop_closing_) {
             /// 当发生回环时，触发一次重绘
             lc_->SetLoopClosedCB([this]() { g2p5_->RedrawGlobalMap(); });
+            lc_->SetLoopAddedCB([this](int idx1, int idx2) {
+                if (ui_) {
+                    ui_->UpdateLoopClosure(idx1, idx2);
+                }
+            });
         }
 
         if (options_.with_2dvisualization_) {
@@ -267,6 +272,9 @@ void SlamSystem::ProcessLidar(const sensor_msgs::msg::PointCloud2::SharedPtr& cl
 
     if (ui_) {
         ui_->UpdateKF(cur_kf_);
+        if (options_.with_loop_closing_ && lc_) {
+            ui_->UpdateLoopClosingStats(lc_->GetActiveHypothesesCount());
+        }
     }
 }
 
@@ -299,6 +307,9 @@ void SlamSystem::ProcessLidar(const livox_ros_driver2::msg::CustomMsg::SharedPtr
 
     if (ui_) {
         ui_->UpdateKF(cur_kf_);
+        if (options_.with_loop_closing_ && lc_) {
+            ui_->UpdateLoopClosingStats(lc_->GetActiveHypothesesCount());
+        }
     }
 }
 
