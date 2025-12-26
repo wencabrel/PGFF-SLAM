@@ -106,8 +106,10 @@ class ESKF {
 
     /// 迭代次数
     int GetIterations() const { return iterations_; }
-    /// 最终平均观测误差
+    /// 最终平均观测误差 (ratio: final/initial)
     double GetFinalRes() const { return final_res_; }
+    /// 获取原始残差值 (point-to-plane error in meters)
+    double GetRawResidual() const { return raw_residual_; }
 
    private:
     double stamp_ = 0.0;
@@ -125,6 +127,7 @@ class ESKF {
 
     int iterations_ = 0;
     double final_res_ = 0.0;
+    double raw_residual_ = 0.0;  // Raw point-to-plane residual in meters
 
     /// anderson acceleration?
     bool use_aa_ = false;

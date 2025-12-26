@@ -20,6 +20,7 @@
 #include "ui/ui_car.h"
 #include "ui/ui_cloud.h"
 #include "ui/ui_trajectory.h"
+#include "ui/imgui_panel.h"
 
 namespace lightning::ui {
 
@@ -177,6 +178,9 @@ class PangolinWindowImpl {
     pangolin::GlText gltext_label_global_;
     pangolin::GlText gltext_stats_;        // Statistics text
     pangolin::GlText gltext_pgff_status_;  // PGFF status text
+
+    // ImGui panel for modern UI controls
+    std::unique_ptr<ImGuiPanel> imgui_panel_;
 
     // camera
     pangolin::OpenGlRenderState s_cam_main_;

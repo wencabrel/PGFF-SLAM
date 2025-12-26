@@ -10,6 +10,7 @@
 #include "ui/pangolin_window.h"
 #include "wrapper/bag_io.h"
 #include "wrapper/ros_utils.h"
+#include "io/yaml_io.h"
 
 #include <opencv2/opencv.hpp>
 
@@ -30,6 +31,13 @@ int main(int argc, char** argv) {
     }
 
     using namespace lightning;
+    
+    // Read topics from config file
+    YAML_IO yaml(FLAGS_config);
+    std::string lidar_topic = yaml.GetValue<std::string>("common", "lidar_topic");
+    std::string imu_topic = yaml.GetValue<std::string>("common", "imu_topic");
+    LOG(INFO) << "Using LiDAR topic: " << lidar_topic;
+    LOG(INFO) << "Using IMU topic: " << imu_topic;
 
     RosbagIO rosbag(FLAGS_input_bag);
 
@@ -52,12 +60,12 @@ int main(int argc, char** argv) {
     Keyframe::Ptr cur_kf = nullptr;
 
     rosbag
-        .AddImuHandle("imu_raw",
+        .AddImuHandle(imu_topic,
                       [&lio](IMUPtr imu) {
                           lio.ProcessIMU(imu);
                           return true;
                       })
-        .AddPointCloud2Handle("points_raw",
+        .AddPointCloud2Handle(lidar_topic,
                               [&](sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
                                   lio.ProcessPointCloud2(cloud);
                                   lio.Run();

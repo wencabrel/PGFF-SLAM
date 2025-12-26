@@ -69,16 +69,16 @@ void UiCar::Render() {
     
     float axis_len = 1.5f;
     glBegin(GL_LINES);
-    // X axis - Red
-    glColor3f(1.0, 0.3, 0.3);
+    // X axis - Vibrant Red
+    glColor3f(1.0, 0.2, 0.3);
     glVertex3f(origin[0], origin[1], origin[2]);
     glVertex3f(origin[0] + axis_len, origin[1], origin[2]);
-    // Y axis - Green  
-    glColor3f(0.3, 1.0, 0.3);
+    // Y axis - Neon Green  
+    glColor3f(0.2, 1.0, 0.4);
     glVertex3f(origin[0], origin[1], origin[2]);
     glVertex3f(origin[0], origin[1] + axis_len, origin[2]);
-    // Z axis - Blue
-    glColor3f(0.3, 0.3, 1.0);
+    // Z axis - Electric Blue
+    glColor3f(0.2, 0.6, 1.0);
     glVertex3f(origin[0], origin[1], origin[2]);
     glVertex3f(origin[0], origin[1], origin[2] + axis_len);
     glEnd();

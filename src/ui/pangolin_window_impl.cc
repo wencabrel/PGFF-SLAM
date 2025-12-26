@@ -760,21 +760,37 @@ void PangolinWindowImpl::CreateDisplayLayout() {
                                   .AddDisplay(d_cam3d_main);
 
     // OpenGL 'view' of data. We might have many views of the same data.
+    // Velocity plot (Odom frame) - Enhanced with beautiful colors
     plotter_vel_ = std::make_unique<pangolin::Plotter>(&log_vel_, -10, 600, -11, 11, 75, 2);
     plotter_vel_->SetBounds(0.02, 0.98, 0.0, 1.0);
     plotter_vel_->Track("$i");
+    plotter_vel_->SetBackgroundColour(pangolin::Colour(0.05f, 0.05f, 0.08f));  // Dark navy
+    plotter_vel_->SetAxisColour(pangolin::Colour(0.3f, 0.4f, 0.6f));  // Steel blue axes
+    plotter_vel_->SetTickColour(pangolin::Colour(0.4f, 0.5f, 0.7f));  // Lighter ticks
+    
+    // Velocity plot (Baselink frame) - Enhanced
     plotter_vel_baselink_ = std::make_unique<pangolin::Plotter>(&log_vel_baselink_, -10, 600, -11, 11, 75, 2);
     plotter_vel_baselink_->SetBounds(0.02, 0.98, 0.0, 1.0);
     plotter_vel_baselink_->Track("$i");
-    // Confidence/Uncertainty plot
+    plotter_vel_baselink_->SetBackgroundColour(pangolin::Colour(0.05f, 0.05f, 0.08f));
+    plotter_vel_baselink_->SetAxisColour(pangolin::Colour(0.3f, 0.4f, 0.6f));
+    plotter_vel_baselink_->SetTickColour(pangolin::Colour(0.4f, 0.5f, 0.7f));
+    
+    // Confidence/Surprise plot - Enhanced with warm colors
     plotter_confidence_ = std::make_unique<pangolin::Plotter>(&log_confidence_, -10, 600, 0, 5.0, 100, 0.5);
     plotter_confidence_->SetBounds(0.02, 0.98, 0.0, 1.0);
     plotter_confidence_->Track("$i");
+    plotter_confidence_->SetBackgroundColour(pangolin::Colour(0.08f, 0.05f, 0.05f));  // Dark warm
+    plotter_confidence_->SetAxisColour(pangolin::Colour(0.6f, 0.4f, 0.3f));  // Warm brown axes
+    plotter_confidence_->SetTickColour(pangolin::Colour(0.7f, 0.5f, 0.4f));  // Lighter warm ticks
     
-    // Error/Residual plot
+    // Error/Residual plot - Enhanced with cool colors
     plotter_err_ = std::make_unique<pangolin::Plotter>(&log_error_, -10, 600, 0, 4.0, 100, 0.5);
     plotter_err_->SetBounds(0.02, 0.98, 0.0, 1.0);
     plotter_err_->Track("$i");
+    plotter_err_->SetBackgroundColour(pangolin::Colour(0.05f, 0.08f, 0.08f));  // Dark cyan
+    plotter_err_->SetAxisColour(pangolin::Colour(0.3f, 0.6f, 0.6f));  // Cyan axes
+    plotter_err_->SetTickColour(pangolin::Colour(0.4f, 0.7f, 0.7f));  // Lighter cyan ticks
 
     pangolin::View &d_plot = pangolin::Display(dis_plot_name_)
                                  .SetBounds(0.0, 1.0, 0.75, 1.0)

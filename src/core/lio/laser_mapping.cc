@@ -172,7 +172,7 @@ void LaserMapping::ProcessIMU(const lightning::IMUPtr &imu) {
             auto nav_state = kf_imu_.GetX();
             // Add PGFF metrics for real-time monitoring
             nav_state.pgff_surprise_ = current_frame_surprise_;
-            nav_state.opt_residual_ = kf_.GetFinalRes();
+            nav_state.opt_residual_ = kf_.GetRawResidual();  // Raw point-to-plane error in meters
             // Compute map uncertainty from ESKF covariance
             auto P = kf_.GetP();
             nav_state.map_uncertainty_ = std::sqrt(P(0,0) + P(1,1) + P(2,2));
@@ -226,7 +226,7 @@ bool LaserMapping::Run() {
                 auto nav_state = kf_.GetX();
                 // Add PGFF metrics for real-time monitoring
                 nav_state.pgff_surprise_ = current_frame_surprise_;
-                nav_state.opt_residual_ = kf_.GetFinalRes();
+                nav_state.opt_residual_ = kf_.GetRawResidual();  // Raw point-to-plane error in meters
                 // Compute map uncertainty from ESKF covariance
                 auto P = kf_.GetP();
                 nav_state.map_uncertainty_ = std::sqrt(P(0,0) + P(1,1) + P(2,2));

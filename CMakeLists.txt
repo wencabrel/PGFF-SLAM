@@ -55,6 +55,7 @@ install(DIRECTORY config
         DESTINATION lib/${PROJECT_NAME}/
 )
 
+add_subdirectory(thirdparty/imgui)
 add_subdirectory(thirdparty/livox_ros_driver)
 
 add_subdirectory(src)

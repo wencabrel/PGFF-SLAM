@@ -157,6 +157,7 @@ void ESKF::Update(ESKF::ObsType obs, const double& R) {
 
         iterations_ = i + 2;  // i从-1开始计
         final_res_ = custom_obs_model_.lidar_residual_mean_ / init_res;
+        raw_residual_ = std::sqrt(custom_obs_model_.lidar_residual_mean_);  // Convert squared residual to meters
 
         int dof_measurement = custom_obs_model_.h_x_.rows();
         StateVecType dx = x_.boxminus(start_x);  // 当前x与起点之间的dx

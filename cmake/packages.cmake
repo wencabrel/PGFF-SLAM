@@ -46,6 +46,8 @@ include_directories(
         ${rclcpp_INCLUDE_DIRS}
         ${rosbag2_cpp_INCLUDE_DIRS}
         ${nav_msgs_INCLUDE_DIRS}
+        ${PROJECT_SOURCE_DIR}/thirdparty/imgui
+        ${PROJECT_SOURCE_DIR}/thirdparty/imgui/backends
 )
 
 include_directories(
@@ -67,5 +69,6 @@ set(third_party_libs
         ${pcl_conversions_LIBRARIES}
         tbb
         ${rosbag2_cpp_LIBRARIES}
+        imgui
 )
 
