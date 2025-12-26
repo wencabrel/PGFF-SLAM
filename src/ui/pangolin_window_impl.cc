@@ -41,12 +41,19 @@ bool PangolinWindowImpl::Init() {
     // opengl buffer
     AllocateBuffer();
 
+    // Initialize ImGui for modern UI controls
+    imgui_panel_ = std::make_unique<ImGuiPanel>();
+    if (!imgui_panel_->Init(win_width_, win_height_)) {
+        LOG(WARNING) << "[UI] Failed to initialize ImGui panel";
+        imgui_panel_.reset();
+    }
+
     // unset the current context from the main thread
     pangolin::GetBoundWindow()->RemoveCurrent();
 
-    // 雷达定位轨迹opengl设置
-    traj_newest_state_.reset(new ui::UiTrajectory(Vec3f(0.98, 0.36, 0.26)));  // Coral red - Frontend
-    traj_scans_.reset(new ui::UiTrajectory(Vec3f(0.34, 0.82, 0.50)));         // Emerald green - Backend
+    // 雷达定位轨迹opengl设置 - Modern vibrant colors
+    traj_newest_state_.reset(new ui::UiTrajectory(Vec3f(1.0, 0.4, 0.3)));   // Vibrant coral - Frontend
+    traj_scans_.reset(new ui::UiTrajectory(Vec3f(0.0, 0.9, 0.6)));          // Neon cyan-green - Backend
 
     current_scan_.reset(new PointCloudType);  // 重置pcl点云指针
     current_scan_ui_.reset(new ui::UiCloud);  // 重置用于渲染的点云指针
@@ -56,7 +63,7 @@ bool PangolinWindowImpl::Init() {
     log_vel_baselink_.SetLabels(std::vector<std::string>{"baselink_vel_x", "baselink_vel_y", "baselink_vel_z"});
     // PGFF metrics - more useful than generic confidence in SLAM mode
     log_confidence_.SetLabels(std::vector<std::string>{"PGFF Surprise"});
-    log_error_.SetLabels(std::vector<std::string>{"Residual", "Uncertainty"});
+    log_error_.SetLabels(std::vector<std::string>{"Residual(cm)", "Uncertainty(sqrt)"});
     log_uncertainty_.SetLabels(std::vector<std::string>{"Pos_Uncertainty"});
     log_info_frontier_.SetLabels(std::vector<std::string>{"Info_Accuracy"});
 
@@ -89,6 +96,12 @@ void PangolinWindowImpl::Reset(const std::vector<Keyframe::Ptr> &keyframes) {
 }
 
 bool PangolinWindowImpl::DeInit() {
+    // Cleanup ImGui if initialized
+    if (imgui_panel_) {
+        imgui_panel_->Shutdown();
+        imgui_panel_.reset();
+    }
+    
     ReleaseBuffer();
     return true;
 }
@@ -326,9 +339,17 @@ bool PangolinWindowImpl::UpdateState() {
     log_vel_baselink_.Log(vel_baselink(0), vel_baselink(1), vel_baselink(2));
     // Log PGFF metrics - surprise indicates novelty, residual indicates registration quality
     log_confidence_.Log(pgff_surprise_ * 100.0);  // Scale to percentage for better visibility
-    // Scale uncertainty to 0-1 range (50m max) for better visualization
-    double scaled_uncertainty = std::min(1.0, map_uncertainty_ / 50.0);
-    log_error_.Log(opt_residual_, scaled_uncertainty);  // Residual and uncertainty together
+    
+    // opt_residual_ is raw point-to-plane error in meters (typically 0.02-0.04m = 2-4cm)
+    // Scale by 100 to convert to centimeters, so 0.03m -> 3.0 on chart
+    double scaled_residual = opt_residual_ * 100.0;
+    
+    // Scale uncertainty: raw values range from 0.01m to 400m+
+    // Use sqrt scale for better visibility: sqrt(uncertainty) puts 1m->1, 4m->2, 9m->3
+    double scaled_uncertainty = std::sqrt(std::max(0.0, map_uncertainty_));
+    scaled_uncertainty = std::min(4.0, scaled_uncertainty);  // Clamp to 0-4
+    
+    log_error_.Log(scaled_residual, scaled_uncertainty);  // Both on 0-4 scale now
 
     newest_frontend_pose_ = pose_;
     traj_newest_state_->AddPt(newest_frontend_pose_);
@@ -409,7 +430,7 @@ void PangolinWindowImpl::DrawAll() {
             /// 闭环后的轨迹 - Purple/Magenta for optimized trajectory
             glLineWidth(4.0);
             glBegin(GL_LINE_STRIP);
-            glColor3f(0.73, 0.33, 0.83);  // Vivid purple/magenta
+            glColor3f(0.6, 0.2, 1.0);  // Electric purple
 
             for (int i = 0; i < all_keyframes_.size() - 1; ++i) {
                 auto p1 = all_keyframes_[i]->GetOptPose().translation();
@@ -518,7 +539,7 @@ void PangolinWindowImpl::RenderLabels() {
     glLoadIdentity();
 
     glTranslatef(5, cur_height - 1.5 * gltext_label_global_.Height(), 1.0);
-    glColor3ub(220, 220, 230);  // Light gray/white for better visibility on dark background
+    glColor3ub(60, 80, 100);  // Subtle blue-gray grid lines
     gltext_label_global_.Draw();
 
     // Restore modelview / project matrices
@@ -591,9 +612,9 @@ void PangolinWindowImpl::RenderPGFFStatus() {
     // Draw text
     glTranslatef(text_x, text_y - status_text.Height() + 10, 1.0);
     if (pgff_enabled_) {
-        glColor3f(0.3, 0.9, 0.4);  // Green when active
+        glColor3f(0.0, 1.0, 0.5);  // Neon green when active
     } else {
-        glColor3f(0.9, 0.3, 0.3);  // Red when inactive
+        glColor3f(1.0, 0.2, 0.3);  // Hot pink-red when inactive
     }
     status_text.Draw();
 
@@ -646,7 +667,7 @@ void PangolinWindowImpl::RenderMinimap() {
     glEnd();
     
     // Draw border
-    glColor3f(0.4, 0.5, 0.6);
+    glColor3f(0.0, 0.8, 0.9);  // Cyan trajectory on minimap
     glLineWidth(2.0);
     glBegin(GL_LINE_LOOP);
     glVertex2f(map_x, map_y);
@@ -676,7 +697,7 @@ void PangolinWindowImpl::RenderMinimap() {
             // Draw trajectory line
             glLineWidth(1.5);
             glBegin(GL_LINE_STRIP);
-            glColor3f(0.73, 0.33, 0.83);  // Purple
+            glColor3f(0.8, 0.3, 1.0);  // Bright purple keyframes
             for (const auto& kf : all_keyframes_) {
                 auto p = kf->GetOptPose().translation();
                 float px = map_x + 10 + (p[0] - min_x) * scale;
@@ -693,7 +714,7 @@ void PangolinWindowImpl::RenderMinimap() {
                 
                 glPointSize(6.0);
                 glBegin(GL_POINTS);
-                glColor3f(0.0, 1.0, 0.5);  // Bright green
+                glColor3f(0.2, 1.0, 0.4);  // Lime green loop closures
                 glVertex2f(px, py);
                 glEnd();
                 glPointSize(1.0);
@@ -704,7 +725,7 @@ void PangolinWindowImpl::RenderMinimap() {
     // Draw "MINIMAP" label
     auto &font = pangolin::default_font();
     pangolin::GlText label = font.Text("MINIMAP");
-    glColor3f(0.7, 0.7, 0.8);
+    glColor3f(0.3, 0.5, 0.7);  // Steel blue border
     glTranslatef(map_x + 5, map_y + map_size - 15, 0);
     label.Draw();
     
@@ -745,10 +766,13 @@ void PangolinWindowImpl::CreateDisplayLayout() {
     plotter_vel_baselink_ = std::make_unique<pangolin::Plotter>(&log_vel_baselink_, -10, 600, -11, 11, 75, 2);
     plotter_vel_baselink_->SetBounds(0.02, 0.98, 0.0, 1.0);
     plotter_vel_baselink_->Track("$i");
+    // Confidence/Uncertainty plot
     plotter_confidence_ = std::make_unique<pangolin::Plotter>(&log_confidence_, -10, 600, 0, 5.0, 100, 0.5);
     plotter_confidence_->SetBounds(0.02, 0.98, 0.0, 1.0);
     plotter_confidence_->Track("$i");
-    plotter_err_ = std::make_unique<pangolin::Plotter>(&log_error_, -10, 600, 0, 2.0, 100, 0.2);
+    
+    // Error/Residual plot
+    plotter_err_ = std::make_unique<pangolin::Plotter>(&log_error_, -10, 600, 0, 4.0, 100, 0.5);
     plotter_err_->SetBounds(0.02, 0.98, 0.0, 1.0);
     plotter_err_->Track("$i");
 
@@ -773,56 +797,47 @@ void PangolinWindowImpl::Render() {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    // menu - Create a clean, organized control panel
-    pangolin::CreatePanel("menu").SetBounds(0.0, 1.0, 0.0, pangolin::Attach::Pix(menu_width_));
+    // ImGui enabled flag
+    bool use_imgui = (imgui_panel_ && imgui_panel_->IsInitialized());
     
-    // === HEADER ===
+    // Pangolin menu variables - declare outside to keep them in scope
     pangolin::Var<std::string> menu_header("menu.═══ LIGHTNING SLAM ═══", "");
-    
-    // === View Controls ===
     pangolin::Var<std::string> menu_view_section("menu.── View Controls ──", "");
-    pangolin::Var<bool> menu_follow_loc("menu.Follow Robot", false, true);                 // 跟踪实时定位
-    pangolin::Var<bool> menu_draw_frontend_traj("menu.Frontend Traj (Red)", true, true);   // 前端实时轨迹
-    pangolin::Var<bool> menu_draw_backend_traj("menu.Backend Traj (Green)", false, true);  // 后端实时轨迹
-    pangolin::Var<bool> menu_draw_loop_closures("menu.Loop Closures", true, true);         // 显示回环
-    
-    // === Camera Presets ===
+    pangolin::Var<bool> menu_follow_loc("menu.Follow Robot", false, true);
+    pangolin::Var<bool> menu_draw_frontend_traj("menu.Frontend Traj (Red)", true, true);
+    pangolin::Var<bool> menu_draw_backend_traj("menu.Backend Traj (Green)", false, true);
+    pangolin::Var<bool> menu_draw_loop_closures("menu.Loop Closures", true, true);
     pangolin::Var<std::string> menu_cam_section("menu.── Camera Presets ──", "");
-    pangolin::Var<bool> menu_reset_3d_view("menu.Top-Down View", false, false);            // 重置俯视视角
-    pangolin::Var<bool> menu_reset_front_view("menu.Side View", false, false);             // 前视视角
-    pangolin::Var<bool> menu_reset_follow_view("menu.Follow View", false, false);          // 跟随视角
-    
-    // === PGFF Controls ===
+    pangolin::Var<bool> menu_reset_3d_view("menu.Top-Down View", false, false);
+    pangolin::Var<bool> menu_reset_front_view("menu.Side View", false, false);
+    pangolin::Var<bool> menu_reset_follow_view("menu.Follow View", false, false);
     pangolin::Var<std::string> menu_pgff_section("menu.── PGFF Modules ──", "");
     pangolin::Var<bool> menu_pgff_enabled("menu.PGFF Enabled", true, true);
     pangolin::Var<bool> menu_uncertainty_map("menu.  Uncertainty Map", true, true);
     pangolin::Var<bool> menu_multi_hyp_lc("menu.  Multi-Hyp LC", true, true);
     pangolin::Var<bool> menu_info_frontier("menu.  Info Frontier", true, true);
     pangolin::Var<bool> menu_surprise_prior("menu.  Surprise Prior", true, true);
-    
-    // === Statistics Display ===
     pangolin::Var<std::string> menu_stats_section("menu.── Statistics ──", "");
     pangolin::Var<int> menu_kf_count("menu.Keyframes", 0);
     pangolin::Var<int> menu_loop_count("menu.Loop Closures", 0);
     pangolin::Var<double> menu_distance("menu.Distance (m)", 0.0);
     pangolin::Var<double> menu_fps("menu.FPS", 0.0);
-    
-    // === PGFF Metrics ===
     pangolin::Var<std::string> menu_metrics_section("menu.── PGFF Metrics ──", "");
     pangolin::Var<double> menu_surprise("menu.Surprise", 0.0);
     pangolin::Var<double> menu_uncertainty("menu.Uncertainty (m)", 0.0);
     pangolin::Var<double> menu_info_acc("menu.Info Accuracy (%)", 0.0);
     pangolin::Var<int> menu_active_hyp("menu.Active Hypotheses", 0);
-    
-    // === Playback ===
     pangolin::Var<std::string> menu_play_section("menu.── Playback ──", "");
-    pangolin::Var<bool> menu_step("menu.Step Mode", false, false);                         // 单步调试
-    pangolin::Var<float> menu_play_speed("menu.Speed", 10.0, 0.1, 10.0);                   // 运行速度
-    
-    // === Display Settings ===
+    pangolin::Var<bool> menu_step("menu.Step Mode", false, false);
+    pangolin::Var<float> menu_play_speed("menu.Speed", 10.0, 0.1, 10.0);
     pangolin::Var<std::string> menu_display_section("menu.── Display ──", "");
-    pangolin::Var<float> menu_intensity("menu.Point Opacity", 0.7, 0.1, 1.0);              // 亮度
-    pangolin::Var<float> menu_point_size("menu.Point Size", 1.0, 0.5, 5.0);                // 点大小
+    pangolin::Var<float> menu_intensity("menu.Point Opacity", 0.7, 0.1, 1.0);
+    pangolin::Var<float> menu_point_size("menu.Point Size", 1.0, 0.5, 5.0);
+    
+    // Only create Pangolin panel if ImGui not available (fallback)
+    if (!use_imgui) {
+        pangolin::CreatePanel("menu").SetBounds(0.0, 1.0, 0.0, pangolin::Attach::Pix(menu_width_));
+    }
 
     // display layout
     CreateDisplayLayout();
@@ -838,8 +853,8 @@ void PangolinWindowImpl::Render() {
             frame_timeout_counter = 0;
         }
         
-        // Clear entire screen - Modern dark slate blue background for better visibility
-        glClearColor(15.0 / 255.0, 23.0 / 255.0, 42.0 / 255.0, 1.0);  // Slate-900 color
+        // Clear entire screen - Deep space blue for professional SLAM visualization
+        glClearColor(8.0 / 255.0, 12.0 / 255.0, 28.0 / 255.0, 1.0);  // Deep space blue
         // 清除了颜色缓冲区（GL_COLOR_BUFFER_BIT）和深度缓冲区（GL_DEPTH_BUFFER_BIT）。
         // 通常在每一帧渲染之前执行的操作，以准备渲染新的内容。
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -847,6 +862,54 @@ void PangolinWindowImpl::Render() {
         // Reset timeout counter on successful render
         frame_timeout_counter = 0;
 
+        // ImGui or Pangolin menu controls
+        if (use_imgui) {
+            // Update ImGui state from internal variables
+            auto& ui_state = imgui_panel_->GetState();
+            ui_state.keyframe_count = keyframe_count_;
+            ui_state.loop_count = loop_closure_count_;
+            ui_state.distance_m = total_distance_;
+            ui_state.fps = processing_fps_;
+            ui_state.surprise = pgff_surprise_;
+            ui_state.uncertainty_m = map_uncertainty_;
+            ui_state.info_accuracy_pct = info_frontier_accuracy_ * 100.0;
+            ui_state.active_hypotheses = active_hypotheses_;
+            
+            // Start ImGui frame (size will be updated after Pangolin layout)
+            imgui_panel_->NewFrame();
+            
+            // Read controls from ImGui
+            following_loc_ = ui_state.follow_robot;
+            draw_frontend_traj_ = ui_state.show_frontend_traj;
+            draw_backend_traj_ = ui_state.show_backend_traj;
+            pgff_enabled_ = ui_state.pgff_enabled;
+            uncertainty_mapping_enabled_ = ui_state.uncertainty_map;
+            multi_hyp_lc_enabled_ = ui_state.multi_hyp_lc;
+            info_frontier_enabled_ = ui_state.info_frontier;
+            surprise_prior_enabled_ = ui_state.surprise_prior;
+            
+            // Camera preset buttons
+            if (ui_state.btn_top_view) {
+                s_cam_main_.SetModelViewMatrix(pangolin::ModelViewLookAt(0, 0, 1000, 0, 0, 0, pangolin::AxisY));
+                ui_state.btn_top_view = false;
+            }
+            if (ui_state.btn_side_view) {
+                s_cam_main_.SetModelViewMatrix(pangolin::ModelViewLookAt(-50, 0, 10, 50, 0, 10, pangolin::AxisZ));
+                ui_state.btn_side_view = false;
+            }
+            if (ui_state.btn_follow_view) {
+                following_loc_ = true;
+                ui_state.follow_robot = true;
+                ui_state.btn_follow_view = false;
+            }
+            
+            // Playback controls
+            debug::flg_next = ui_state.step_mode;
+            debug::play_speed = ui_state.play_speed;
+            ui::opacity = ui_state.point_opacity;
+            
+        } else {
+            // OLD Pangolin menu control
         // menu control
         following_loc_ = menu_follow_loc;
         draw_frontend_traj_ = menu_draw_frontend_traj;
@@ -895,9 +958,19 @@ void PangolinWindowImpl::Render() {
 
         debug::play_speed = menu_play_speed;
         ui::opacity = menu_intensity;
+        } // End of Pangolin menu control (if !use_imgui)
 
         // Render pointcloud
         RenderClouds();
+        
+        // Render ImGui panel after Pangolin layout is set up
+        if (use_imgui) {
+            // Now query viewport after Pangolin has set up its displays
+            GLint viewport[4];
+            glGetIntegerv(GL_VIEWPORT, viewport);
+            imgui_panel_->UpdateDisplaySize(viewport[2], viewport[3]);
+            imgui_panel_->Render();
+        }
 
         /// 处理相机跟随问题
         if (following_loc_) {
