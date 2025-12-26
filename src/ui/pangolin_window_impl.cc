@@ -187,6 +187,99 @@ bool PangolinWindowImpl::UpdateCurrentScan() {
     return true;
 }
 
+void PangolinWindowImpl::UpdatePersistentMapLOD() {
+    // Only update periodically to save CPU
+    static int update_counter = 0;
+    if (++update_counter % persistent_map_update_interval_ != 0) {
+        return;
+    }
+    
+    // Get list of new keyframes to process (thread-safe copy of IDs)
+    std::vector<std::pair<size_t, CloudPtr>> new_keyframes;
+    {
+        UL lock(mtx_current_scan_);
+        for (size_t i = last_processed_kf_id_; i < all_keyframes_.size(); ++i) {
+            auto& kf = all_keyframes_[i];
+            CloudPtr cloud = kf->GetCloud();  // This is already downsampled
+            if (cloud && !cloud->empty()) {
+                new_keyframes.push_back({i, cloud});
+            }
+        }
+        last_processed_kf_id_ = all_keyframes_.size();
+    }
+    
+    // Process new keyframes outside the lock
+    for (const auto& [idx, cloud] : new_keyframes) {
+        KeyframeLOD lod;
+        lod.keyframe_id = idx;
+        lod.valid = true;
+        
+        // Further downsample for LOD rendering (simple strided sampling)
+        int stride = std::max(1, static_cast<int>(cloud->size() / 500));  // ~500 points per keyframe
+        lod.local_points.reserve(cloud->size() / stride + 1);
+        lod.colors.reserve(cloud->size() / stride + 1);
+        
+        for (size_t i = 0; i < cloud->size(); i += stride) {
+            const auto& pt = cloud->points[i];
+            lod.local_points.push_back(Vec3f(pt.x, pt.y, pt.z));
+            
+            // Height-based coloring (similar to HEIGHT_COLOR)
+            float h = std::clamp((pt.z + 2.0f) / 6.0f, 0.0f, 1.0f);  // Normalize height
+            lod.colors.push_back(Vec4f(0.3f + 0.4f * h, 0.5f + 0.3f * (1.0f - h), 0.7f - 0.3f * h, 0.7f));
+        }
+        
+        // Store in persistent map
+        {
+            std::lock_guard<std::mutex> plock(mtx_persistent_map_);
+            if (idx >= persistent_map_lod_.size()) {
+                persistent_map_lod_.resize(idx + 1);
+            }
+            persistent_map_lod_[idx] = std::move(lod);
+        }
+    }
+}
+
+void PangolinWindowImpl::RenderPersistentMap() {
+    // Make a copy of keyframes for thread-safe access to poses
+    std::vector<std::pair<size_t, SE3>> keyframe_poses;
+    {
+        UL lock(mtx_current_scan_);
+        keyframe_poses.reserve(all_keyframes_.size());
+        for (size_t i = 0; i < all_keyframes_.size(); ++i) {
+            keyframe_poses.push_back({i, all_keyframes_[i]->GetOptPose()});
+        }
+    }
+    
+    // Now render with the persistent map lock
+    std::lock_guard<std::mutex> plock(mtx_persistent_map_);
+    
+    glPointSize(1.5f);
+    glBegin(GL_POINTS);
+    
+    for (const auto& [kf_idx, pose] : keyframe_poses) {
+        if (kf_idx >= persistent_map_lod_.size()) continue;
+        const auto& lod = persistent_map_lod_[kf_idx];
+        if (!lod.valid || lod.local_points.empty()) continue;
+        
+        // Transform each point by the CURRENT optimized pose
+        // This is the key: we use the latest pose, not a cached one
+        Eigen::Matrix3f R = pose.rotationMatrix().cast<float>();
+        Eigen::Vector3f t = pose.translation().cast<float>();
+        
+        for (size_t i = 0; i < lod.local_points.size(); ++i) {
+            // Transform point from local to world frame using current pose
+            Vec3f world_pt = R * lod.local_points[i] + t;
+            const Vec4f& color = lod.colors[i];
+            
+            glColor4f(color[0], color[1], color[2], color[3]);
+            glVertex3f(world_pt[0], world_pt[1], world_pt[2]);
+        }
+    }
+    
+    glEnd();
+    glPointSize(1.0f);
+}
+
 bool PangolinWindowImpl::UpdateState() {
     if (!kf_result_need_update_.load()) {
         return false;
@@ -198,6 +291,13 @@ bool PangolinWindowImpl::UpdateState() {
     double roll = pose_.angleX();
     double pitch = pose_.angleY();
     double yaw = pose_.angleZ();
+
+    // Debug: Print velocity values every 100 frames
+    static int vel_debug_counter = 0;
+    if (vel_debug_counter++ % 100 == 0) {
+        LOG(INFO) << "[UI-VEL] Global vel: [" << vel_(0) << ", " << vel_(1) << ", " << vel_(2) 
+                  << "] Baselink vel: [" << vel_baselink(0) << ", " << vel_baselink(1) << ", " << vel_baselink(2) << "]";
+    }
 
     // 滤波器状态作曲线图
     log_vel_.Log(vel_(0), vel_(1), vel_(2));
@@ -236,6 +336,10 @@ bool PangolinWindowImpl::UpdateState() {
 }
 
 void PangolinWindowImpl::DrawAll() {
+    // Render persistent map FIRST (background layer with all explored areas)
+    // This uses current optimized poses, so it stays consistent after loop closure
+    RenderPersistentMap();
+    
     /// 地图
     for (const auto &pc : cloud_map_ui_) {
         pc.second->Render();
@@ -246,7 +350,7 @@ void PangolinWindowImpl::DrawAll() {
         pc.second->Render();
     }
 
-    /// 缓存的scans
+    /// 缓存的scans (recent high-detail scans on top)
     for (const auto &s : scans_) {
         if (s) s->Render();
     }
@@ -365,6 +469,7 @@ void PangolinWindowImpl::RenderClouds() {
     UpdateDynamicMap();
     UpdateState();
     UpdateCurrentScan();
+    UpdatePersistentMapLOD();  // Update persistent map with new keyframes
 
     // 绘制
     pangolin::Display(dis_3d_main_name_).Activate(s_cam_main_);

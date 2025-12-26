@@ -113,8 +113,23 @@ class PangolinWindowImpl {
     bool surprise_prior_enabled_ = true;
 
     Sophus::SE3d T_imu_lidar_;
-    int max_size_of_current_scan_ = 200;  // 当前扫描数据保留多少个
+    int max_size_of_current_scan_ = 100;  // Recent scans for high detail
     std::vector<std::shared_ptr<Keyframe>> all_keyframes_;
+    
+    // Persistent map: stores downsampled LOCAL frame points for each keyframe
+    // At render time, we apply the current optimized pose via OpenGL transforms
+    // This ensures the map updates correctly after loop closure optimization
+    struct KeyframeLOD {
+        std::vector<Vec3f> local_points;  // Points in lidar/local frame (NOT world frame)
+        std::vector<Vec4f> colors;        // Per-point colors
+        size_t keyframe_id;
+        bool valid = false;
+    };
+    std::vector<KeyframeLOD> persistent_map_lod_;  // One per keyframe
+    std::mutex mtx_persistent_map_;
+    size_t last_processed_kf_id_ = 0;
+    static constexpr float lod_voxel_size_ = 0.5f;  // Downsample for LOD
+    static constexpr int persistent_map_update_interval_ = 3;  // Update every N frames
 
     //////////////////////////////// 以下和render相关 ///////////////////////////
    private:
@@ -125,6 +140,10 @@ class PangolinWindowImpl {
     void CreateDisplayLayout();
 
     void DrawAll();  // 作图：画定位窗口
+    
+    // Persistent map rendering - renders all keyframe clouds with current optimized poses
+    void UpdatePersistentMapLOD();  // Downsample new keyframes and store local-frame points
+    void RenderPersistentMap();     // Render using OpenGL transforms with current poses
 
     /// 渲染点云，调用各种Update函数
     void RenderClouds();
