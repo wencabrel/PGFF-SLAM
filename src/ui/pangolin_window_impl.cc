@@ -223,8 +223,31 @@ void PangolinWindowImpl::UpdatePersistentMapLOD() {
             const auto& pt = cloud->points[i];
             lod.local_points.push_back(Vec3f(pt.x, pt.y, pt.z));
             
-            // Simple white/gray color for all points
-            lod.colors.push_back(Vec4f(0.8f, 0.8f, 0.8f, 0.85f));
+            // Height-based RGB coloring using turbo colormap style
+            // Normalize height to [0, 1] range (assuming height range of -5 to 15 meters)
+            float h = std::max(-5.0f, std::min(15.0f, pt.z));
+            float t = (h + 5.0f) / 20.0f;  // Normalize to [0, 1]
+            
+            // Turbo colormap approximation: blue -> cyan -> green -> yellow -> red
+            Vec4f color;
+            if (t < 0.25f) {
+                // Blue to cyan
+                float s = t / 0.25f;
+                color = Vec4f(0.18f + s * 0.02f, 0.18f + s * 0.62f, 0.85f - s * 0.15f, 0.85f);
+            } else if (t < 0.5f) {
+                // Cyan to green
+                float s = (t - 0.25f) / 0.25f;
+                color = Vec4f(0.2f + s * 0.3f, 0.8f + s * 0.1f, 0.7f - s * 0.5f, 0.85f);
+            } else if (t < 0.75f) {
+                // Green to yellow
+                float s = (t - 0.5f) / 0.25f;
+                color = Vec4f(0.5f + s * 0.5f, 0.9f, 0.2f - s * 0.15f, 0.85f);
+            } else {
+                // Yellow to red
+                float s = (t - 0.75f) / 0.25f;
+                color = Vec4f(1.0f, 0.9f - s * 0.7f, 0.05f, 0.85f);
+            }
+            lod.colors.push_back(color);
         }
         
         // Store in persistent map
