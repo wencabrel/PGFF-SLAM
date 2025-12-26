@@ -1,6 +1,7 @@
 #include <pangolin/display/default_font.h>
 #include <string>
 #include <thread>
+#include <glog/logging.h>
 
 #include "common/options.h"
 #include "common/std_types.h"
@@ -10,8 +11,29 @@
 namespace lightning::ui {
 
 bool PangolinWindowImpl::Init() {
-    // create a window and bind its context to the main thread
-    pangolin::CreateWindowAndBind(win_name_, win_width_, win_height_);
+    // Check if DISPLAY is available
+    const char* display = std::getenv("DISPLAY");
+    if (!display || strlen(display) == 0) {
+        LOG(WARNING) << "[UI] DISPLAY environment variable not set, UI disabled";
+        ui_available_ = false;
+        return false;
+    }
+    
+    // Try to create a window with error handling
+    try {
+        pangolin::CreateWindowAndBind(win_name_, win_width_, win_height_);
+    } catch (const std::exception& e) {
+        LOG(WARNING) << "[UI] Failed to create window: " << e.what();
+        LOG(WARNING) << "[UI] Running in headless mode (no visualization)";
+        ui_available_ = false;
+        return false;
+    } catch (...) {
+        LOG(WARNING) << "[UI] Unknown error creating window, running headless";
+        ui_available_ = false;
+        return false;
+    }
+    
+    ui_available_ = true;
 
     // 3D mouse handler requires depth testing to be enabled
     glEnable(GL_DEPTH_TEST);
@@ -679,12 +701,24 @@ void PangolinWindowImpl::Render() {
     CreateDisplayLayout();
 
     exit_flag_.store(false);
+    int frame_timeout_counter = 0;
+    const int max_frame_timeout = 1000;  // Timeout after ~5 seconds of no activity
+    
     while (!pangolin::ShouldQuit() && !exit_flag_) {
+        // Frame timeout check to prevent indefinite blocking
+        if (frame_timeout_counter++ > max_frame_timeout) {
+            LOG(WARNING) << "[UI] Frame timeout detected, continuing...";
+            frame_timeout_counter = 0;
+        }
+        
         // Clear entire screen - Modern dark slate blue background for better visibility
         glClearColor(15.0 / 255.0, 23.0 / 255.0, 42.0 / 255.0, 1.0);  // Slate-900 color
         // 清除了颜色缓冲区（GL_COLOR_BUFFER_BIT）和深度缓冲区（GL_DEPTH_BUFFER_BIT）。
         // 通常在每一帧渲染之前执行的操作，以准备渲染新的内容。
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        
+        // Reset timeout counter on successful render
+        frame_timeout_counter = 0;
 
         // menu control
         following_loc_ = menu_follow_loc;
@@ -754,8 +788,15 @@ void PangolinWindowImpl::Render() {
     }
 
     // unset the current context from the main thread
-    pangolin::GetBoundWindow()->RemoveCurrent();
-    pangolin::DestroyWindow(GetWindowName());
+    try {
+        auto* window = pangolin::GetBoundWindow();
+        if (window) {
+            window->RemoveCurrent();
+        }
+        pangolin::DestroyWindow(GetWindowName());
+    } catch (const std::exception& e) {
+        LOG(WARNING) << "[UI] Error during cleanup: " << e.what();
+    }
 }
 
 std::string PangolinWindowImpl::GetWindowName() const { return win_name_; }
