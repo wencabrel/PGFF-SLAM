@@ -146,19 +146,17 @@ bool PangolinWindowImpl::UpdateDynamicMap() {
         if (it != cloud_dyn_ui_.end()) {
             // 存在也要更新
             it->second.reset(new ui::UiCloud);
-            // it->second->SetRenderColor(ui::UiCloud::UseColor::PCL_COLOR);
-            it->second->SetCustomColor(Vec4f(0.0, 0.2, 1.0, 1.0));
             it->second->SetCloud(cp.second, SE3());
-            it->second->SetRenderColor(ui::UiCloud::UseColor::CUSTOM_COLOR);
+            // Use HEIGHT_COLOR for better depth perception and detail recognition
+            it->second->SetRenderColor(ui::UiCloud::UseColor::HEIGHT_COLOR);
             continue;
         }
 
         /// 不存在则创建一个
         std::shared_ptr<ui::UiCloud> ui_cloud(new ui::UiCloud);
-        ui_cloud->SetCustomColor(Vec4f(0.0, 0.2, 1.0, 1.0));
         ui_cloud->SetCloud(cp.second, SE3());
-        ui_cloud->SetRenderColor(ui::UiCloud::UseColor::CUSTOM_COLOR);
-        // ui_cloud->SetRenderColor(ui::UiCloud::UseColor::PCL_COLOR);
+        // Use HEIGHT_COLOR for better depth perception and detail recognition
+        ui_cloud->SetRenderColor(ui::UiCloud::UseColor::HEIGHT_COLOR);
         cloud_dyn_ui_.emplace(cp.first, ui_cloud);
     }
 

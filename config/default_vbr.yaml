@@ -45,7 +45,7 @@ g2p5:
   floor_height: -1.2   # 默认地面高度
   min_th_floor: 0.50  # 距离地面这个高度的障碍物被扫入栅格地图中
   max_th_floor: 1.0  # 距离地面这个高度的障碍物被扫入栅格地图中
-  grid_map_resolution: 0.2 # 栅格地图分辨率
+  grid_map_resolution: 0.1 # 栅格地图分辨率 (0.1m for finer details)
 
 system:
   with_loop_closing: true # 是否需要回环检测
