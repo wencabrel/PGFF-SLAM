@@ -163,7 +163,7 @@ class PangolinWindowImpl {
     static constexpr float cam_z_near_ = 1.0;
     static constexpr float cam_z_far_ = 1e10;
     static constexpr int menu_width_ = 210;
-    const std::string win_name_ = "UI";
+    const std::string win_name_ = "PGFF Viewer";
     const std::string dis_main_name_ = "main";
     const std::string dis_3d_name_ = "Cam 3D";
     const std::string dis_3d_main_name_ = "Cam 3D Main";  // main

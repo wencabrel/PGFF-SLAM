@@ -147,16 +147,16 @@ bool PangolinWindowImpl::UpdateDynamicMap() {
             // 存在也要更新
             it->second.reset(new ui::UiCloud);
             it->second->SetCloud(cp.second, SE3());
-            // Use HEIGHT_COLOR for better depth perception and detail recognition
-            it->second->SetRenderColor(ui::UiCloud::UseColor::HEIGHT_COLOR);
+            // Use PCL_COLOR (viridis intensity gradient) for consistent visualization
+            it->second->SetRenderColor(ui::UiCloud::UseColor::PCL_COLOR);
             continue;
         }
 
         /// 不存在则创建一个
         std::shared_ptr<ui::UiCloud> ui_cloud(new ui::UiCloud);
         ui_cloud->SetCloud(cp.second, SE3());
-        // Use HEIGHT_COLOR for better depth perception and detail recognition
-        ui_cloud->SetRenderColor(ui::UiCloud::UseColor::HEIGHT_COLOR);
+        // Use PCL_COLOR (viridis intensity gradient) for consistent visualization
+        ui_cloud->SetRenderColor(ui::UiCloud::UseColor::PCL_COLOR);
         cloud_dyn_ui_.emplace(cp.first, ui_cloud);
     }
 
@@ -536,9 +536,7 @@ void PangolinWindowImpl::RenderLabels() {
     glPushMatrix();
     glLoadIdentity();
 
-    glTranslatef(5, cur_height - 1.5 * gltext_label_global_.Height(), 1.0);
-    glColor3ub(60, 80, 100);  // Subtle blue-gray grid lines
-    gltext_label_global_.Draw();
+    // Text overlay removed - using ImGui panel instead
 
     // Restore modelview / project matrices
     glMatrixMode(GL_PROJECTION);
@@ -1016,12 +1014,7 @@ void PangolinWindowImpl::Render() {
 std::string PangolinWindowImpl::GetWindowName() const { return win_name_; }
 
 void PangolinWindowImpl::AllocateBuffer() {
-    std::string global_text(
-        "Lightning SLAM - LiDAR-Inertial Odometry System\n"
-        "Controls: Mouse drag to rotate, Scroll to zoom, Shift+drag to pan\n"
-        "Red axis: Frontend pose | Green axis: Backend pose | Purple: Optimized trajectory");
-    auto &font = pangolin::default_font();
-    gltext_label_global_ = font.Text(global_text);
+    // Text overlay removed for cleaner visualization
 }
 
 void PangolinWindowImpl::ReleaseBuffer() {}
