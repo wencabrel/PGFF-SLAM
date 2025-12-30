@@ -13,12 +13,12 @@ fasterlio:
   time_scale: 1e-3             # 兼容不同数据集的时间单位，仅对Velodyne LiDAR(lidar_type=2)生效
 
   skip_lidar_num: 0 # 点云的跳帧情况
-  point_filter_num: 5 # 点云采样参数 (reduced from 10 to retain more points)
+  point_filter_num: 2 # 点云采样参数 (reduced for maximum point retention)
   max_iteration: 6 # 最大迭代次数
   filter_size_scan: 0.5 # 对scan进行的降采样
-  filter_size_map: 0.3 # reduced from 0.5m to preserve point density
+  filter_size_map: 0.2 # matches grid resolution for consistent detail
 
-  ivox_grid_resolution: 0.5        # default=0.2
+  ivox_grid_resolution: 0.3        # denser local map for better detail retention
   ivox_nearby_type: 18             # 6, 18, 26
   esti_plane_threshold: 0.1        # default=0.1
 
