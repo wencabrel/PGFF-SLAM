@@ -12,6 +12,7 @@
 
 #include <yaml-cpp/yaml.h>
 #include <filesystem>
+#include <iomanip>
 #include <opencv2/opencv.hpp>
 
 namespace lightning {
@@ -234,6 +235,40 @@ void SlamSystem::SaveMap(const std::string& path) {
     }
 
     LOG(INFO) << "map saved";
+}
+
+void SlamSystem::SaveTrajectory(const std::string& filename) {
+    std::string save_file = filename;
+    if (save_file.empty()) {
+        save_file = "./trajectory_" + map_name_ + ".txt";
+    }
+
+    LOG(INFO) << "Saving trajectory to " << save_file;
+
+    std::ofstream traj_file(save_file);
+    if (!traj_file.is_open()) {
+        LOG(ERROR) << "Failed to open trajectory file: " << save_file;
+        return;
+    }
+
+    // Get all keyframes and save in TUM format: timestamp x y z qx qy qz qw
+    auto keyframes = lio_->GetAllKeyframes();
+    traj_file << std::fixed << std::setprecision(6);
+
+    for (const auto& kf : keyframes) {
+        SE3 pose = kf->GetOptPose();  // Use optimized pose after loop closure
+        Vec3d translation = pose.translation();
+        Quatd rotation(pose.so3().matrix());
+
+        // TUM format: timestamp tx ty tz qx qy qz qw
+        traj_file << kf->GetTimestamp() << " "
+                  << translation.x() << " " << translation.y() << " " << translation.z() << " "
+                  << rotation.x() << " " << rotation.y() << " " << rotation.z() << " " << rotation.w()
+                  << "\n";
+    }
+
+    traj_file.close();
+    LOG(INFO) << "Trajectory saved with " << keyframes.size() << " poses";
 }
 
 void SlamSystem::ProcessIMU(const lightning::IMUPtr& imu) {

@@ -27,6 +27,7 @@ class Keyframe {
 
     unsigned long GetID() const { return id_; }
     CloudPtr GetCloud() const { return cloud_; }
+    double GetTimestamp() const { return timestamp_; }
 
     SE3 GetLIOPose() {
         UL lock(data_mutex_);

@@ -73,6 +73,7 @@ int main(int argc, char** argv) {
         .Go();
 
     slam.SaveMap("");
+    slam.SaveTrajectory("");  // Save trajectory in TUM format for VBR benchmark
     Timer::PrintAll();
 
     LOG(INFO) << "done";

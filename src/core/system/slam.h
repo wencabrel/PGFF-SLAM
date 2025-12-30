@@ -64,6 +64,9 @@ class SlamSystem {
     /// 保存地图，默认保存至./data/地图名/ 下方
     void SaveMap(const std::string& path = "");
 
+    /// 保存轨迹（TUM格式用于VBR benchmark评估）
+    void SaveTrajectory(const std::string& filename = "");
+
     /// 处理IMU
     void ProcessIMU(const lightning::IMUPtr& imu);
 
