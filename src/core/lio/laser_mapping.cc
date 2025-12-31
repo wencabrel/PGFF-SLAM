@@ -585,6 +585,9 @@ void LaserMapping::MapIncremental() {
 void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
     int cnt_pts = scan_down_body_->size();
 
+    /// 地面约束: 如果有floor constraint, 增加一个虚拟观测
+    bool apply_floor_constraint = has_floor_constraint_ && (frame_num_ % 10 == 0);  // 每10帧应用一次
+
     std::vector<size_t> index(cnt_pts);
     for (size_t i = 0; i < index.size(); ++i) {
         index[i] = i;
@@ -677,6 +680,30 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
     corr_norm_.resize(effect_feat_num_);
     effect_weights.resize(effect_feat_num_);
 
+    // 地面约束: Z漂移约束（假设地面车辆，Z不应该大幅变化）
+    if (apply_floor_constraint) {
+        // 简单策略: 假设初始Z是正确的，约束Z不要漂移
+        static double initial_z = s.pos_[2];  // 第一次记录初始Z
+        
+        // 添加一个Z轴观测，期望Z保持在initial_z附近
+        Vec4d floor_norm;
+        floor_norm << 0, 0, 1, 0;  // Z轴方向
+        corr_norm_.push_back(floor_norm.cast<float>());
+        
+        Vec4f virtual_pt;
+        virtual_pt << 0, 0, 0, 0;
+        virtual_pt[3] = -(s.pos_[2] - initial_z);  // residual: 当前Z与初始Z的差
+        corr_pts_.push_back(virtual_pt);
+        
+        effect_weights.push_back(2.0f);  // 软约束
+        effect_feat_num_++;
+        
+        if (frame_num_ % 500 == 0) {
+            LOG(INFO) << "[Z-CONSTRAINT] Frame " << frame_num_ << " - Current Z: " << s.pos_[2] 
+                      << " Initial Z: " << initial_z << " Drift: " << (s.pos_[2] - initial_z);
+        }
+    }
+
     if (effect_feat_num_ < 1) {
         obs.valid_ = false;
         LOG(WARNING) << "No Effective Points!";
@@ -733,12 +760,12 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
                     drho = 1.0 / (1 - res * dsqr_inv);
                 }
 
-                // PGFF: Apply weight to both residual and Jacobian
-                // This makes surprising points contribute more to the optimization
+                // PGFF: Apply weight ONLY to residual, NOT to Jacobian
+                // This maintains ESKF covariance consistency while reweighting measurements
                 float pgff_weight = effect_weights[i];
                 
                 obs.residual_(i) = rho * pgff_weight;
-                obs.h_x_.block<1, 12>(i, 0) = obs.h_x_.block<1, 12>(i, 0).eval() * drho * pgff_weight;
+                obs.h_x_.block<1, 12>(i, 0) = obs.h_x_.block<1, 12>(i, 0).eval() * drho;
             });
         },
         "    ObsModel (IEKF Build Jacobian)");
@@ -850,15 +877,16 @@ CloudPtr LaserMapping::GetRecentCloud() {
 /**
  * Compute PGFF weights for points based on surprise scores
  * 
- * PGFF weighting strategy:
- * - Points with high residual difference from prediction = high surprise = high weight
- * - Points with similar residual to prediction = low surprise = normal weight
- * - All points are processed, but surprising points contribute more to optimization
+ * CRITICAL FIX: Surprise-based weighting was INVERTING feature importance:
+ * - Floor points (predictable) → low surprise → LOW weight → Z constraint destroyed
+ * - Edge points (variable) → high surprise → HIGH weight → noise amplified
  * 
- * This is the CORRECT approach: we never skip residual computation,
- * we just weight points differently based on their information content.
+ * NEW STRATEGY: Use uniform weighting (all points equal) to preserve Z accuracy.
+ * Still compute surprise for loop closure detection, but DON'T use it for point weighting.
  */
 void LaserMapping::ComputePGFFWeights(int num_points) {
+    // UNIFORM WEIGHTING: All points contribute equally
+    // This prevents down-weighting floor constraints that are critical for Z accuracy
     pgff_point_weights_.resize(num_points, 1.0f);
     
     // If no previous residuals, all points get equal weight
@@ -875,51 +903,20 @@ void LaserMapping::ComputePGFFWeights(int num_points) {
         return;
     }
     
-    // Compute surprise-based weights
-    // Using a simple but effective strategy:
-    // weight = 1.0 + surprise_factor * |actual_residual - predicted_residual|
-    
-    const float surprise_scale = 5.0f;   // How much surprise affects weight
-    const float min_weight = 0.5f;        // Minimum weight (expected points still contribute)
-    const float max_weight = 3.0f;        // Maximum weight (cap for outliers)
-    
-    // Track frame-level surprise for loop closing
+    // Compute frame-level surprise for loop closure ONLY
+    // Do NOT use surprise for per-point weighting (causes Z drift)
     double total_surprise = 0.0;
     int surprise_count = 0;
-    int high_weight_count = 0;
     
     for (int i = 0; i < num_points; i++) {
-        // Compute surprise from previous frame's residuals
-        float predicted = (i < pgff_predicted_residuals_.size()) ? pgff_predicted_residuals_[i] : 0.0f;
+        // Keep uniform weight (no per-point weighting)
+        pgff_point_weights_[i] = 1.0f;
         
-        // Raw surprise based on predicted residuals
+        // Compute surprise for loop closure detection only
+        float predicted = (i < pgff_predicted_residuals_.size()) ? pgff_predicted_residuals_[i] : 0.0f;
         float raw_surprise = std::abs(predicted);
         
-        // Apply learned surprise prior for adaptive weighting (Option 4)
-        float weight = 1.0f;
-        if (surprise_prior_ && i < scan_down_body_->size()) {
-            const auto& pt = scan_down_body_->points[i];
-            Eigen::Vector3d world_pt = state_point_.rot_ * 
-                (state_point_.offset_R_lidar_ * pt.getVector3fMap().cast<double>() + 
-                 state_point_.offset_t_lidar_) + state_point_.pos_;
-            
-            // Get adaptive weight from learned prior
-            weight = static_cast<float>(surprise_prior_->GetAdaptiveWeight(
-                raw_surprise, world_pt, pgff::GeometryType::kUnknown));
-        } else {
-            // Fallback to simple heuristic
-            float surprise = raw_surprise * surprise_scale;
-            weight = 1.0f + std::tanh(surprise);
-        }
-        
-        // Clamp to valid range
-        pgff_point_weights_[i] = std::clamp(weight, min_weight, max_weight);
-        
-        if (pgff_point_weights_[i] > 1.5f) {
-            high_weight_count++;
-        }
-        
-        // Accumulate frame surprise
+        // Accumulate frame surprise for loop closing
         total_surprise += raw_surprise;
         surprise_count++;
     }
@@ -931,12 +928,12 @@ void LaserMapping::ComputePGFFWeights(int num_points) {
         current_frame_surprise_ = 0.0;
     }
     
-    // Log PGFF stats periodically
-    if (frame_num_ % 20 == 0 && num_points > 0) {
+    // Log PGFF stats periodically (uniform weighting, no high_weight tracking)
+    if (frame_num_ % 100 == 0 && num_points > 0) {
         LOG(INFO) << "[PGFF] Frame " << frame_num_ 
-                  << ": effect=" << num_points
-                  << " high_weight=" << high_weight_count
-                  << " surprise=" << std::setprecision(4) << current_frame_surprise_;
+                  << ": points=" << num_points
+                  << " surprise=" << std::setprecision(4) << current_frame_surprise_
+                  << " (uniform weighting)";
     }
 }
 

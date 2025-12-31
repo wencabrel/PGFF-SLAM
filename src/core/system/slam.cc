@@ -303,6 +303,16 @@ void SlamSystem::ProcessLidar(const sensor_msgs::msg::PointCloud2::SharedPtr& cl
 
     if (options_.with_gridmap_) {
         g2p5_->PushKeyframe(cur_kf_);
+        
+        // 将G2P5计算的地面约束传递给LIO
+        Vec4d floor_coeffs = g2p5_->GetFloorCoeffs();
+        if (floor_coeffs[2] > 0.9) {  // 确保是有效的垂直平面
+            lio_->SetFloorConstraint(floor_coeffs);
+            static int log_count1 = 0;
+            if (log_count1++ % 100 == 0) {
+                LOG(INFO) << "[SLAM-PC2] Floor constraint set: " << floor_coeffs.transpose();
+            }
+        }
     }
 
     if (ui_) {
@@ -338,6 +348,12 @@ void SlamSystem::ProcessLidar(const livox_ros_driver2::msg::CustomMsg::SharedPtr
 
     if (options_.with_gridmap_) {
         g2p5_->PushKeyframe(cur_kf_);
+        
+        // 将G2P5计算的地面约束传递给LIO
+        Vec4d floor_coeffs = g2p5_->GetFloorCoeffs();
+        if (floor_coeffs[2] > 0.9) {  // 确保是有效的垂直平面
+            lio_->SetFloorConstraint(floor_coeffs);
+        }
     }
 
     if (ui_) {

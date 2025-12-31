@@ -83,6 +83,12 @@ class LaserMapping {
     /// 获取关键帧
     Keyframe::Ptr GetKeyframe() const { return last_kf_; }
 
+    /// 设置地面约束(来自G2P5)
+    void SetFloorConstraint(const Vec4d& floor_coeffs) { 
+        floor_coeffs_ = floor_coeffs; 
+        has_floor_constraint_ = true; 
+    }
+
     /// 获取激光的状态
     NavState GetState() const { return state_point_; }
 
@@ -213,6 +219,10 @@ class LaserMapping {
     bool use_aa_ = false;  // use anderson acceleration?
 
     std::shared_ptr<ui::PangolinWindow> ui_ = nullptr;
+    
+    /// 地面约束(来自G2P5)
+    Vec4d floor_coeffs_ = Vec4d(0, 0, 1, 0);  // 地面方程 ax+by+cz+d=0
+    bool has_floor_constraint_ = false;
     
     /// PGFF - Predictive Geometric Flow Fields
     std::unique_ptr<pgff::PredictiveLIO> pgff_ = nullptr;

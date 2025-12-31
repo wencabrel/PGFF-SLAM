@@ -92,6 +92,9 @@ class G2P5 {
     /// 查看是否仍然有没绘制完的关键帧
     bool IsBusy() { return is_busy_; }
 
+    /// 获取地面方程参数 (ax + by + cz + d = 0)
+    Vec4d GetFloorCoeffs() const { return floor_coeffs_; }
+
    private:
     /// 在已有的map上增加一些关键帧
     bool AddKfToMap(const std::vector<Keyframe::Ptr> &kfs, G2P5MapPtr &map);
