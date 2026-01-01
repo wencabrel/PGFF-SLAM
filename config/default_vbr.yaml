@@ -1,59 +1,50 @@
-# 针对NCLT的配置
+# Baseline configuration (no PGFF enhancements) - WITH UI
 common:
   dataset: "vbr"
   lidar_topic: "/ouster/points"
   livox_lidar_topic: "/livox/lidar"
   imu_topic: "/imu/data"
 
-# fasterlio 参数
 fasterlio:
-  lidar_type: 3                # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR,
+  lidar_type: 3
   scan_line: 32
-  blind: 0.5                # 盲区，小于盲区距离的不会处理
-  time_scale: 1e-3             # 兼容不同数据集的时间单位，仅对Velodyne LiDAR(lidar_type=2)生效
-
-  skip_lidar_num: 0 # 点云的跳帧情况
-  point_filter_num: 10 # 点云采样参数
-  max_iteration: 6 # 最大迭代次数
-  filter_size_scan: 0.5 # 对scan进行的降采样
-  filter_size_map: 0.5 # map voxel filter size
-
-  ivox_grid_resolution: 0.5        # ivox grid resolution
-  ivox_nearby_type: 18             # 6, 18, 26
-  esti_plane_threshold: 0.1        # default=0.1
-
-  use_aa: true  # use anderson-acceleration
-
+  blind: 0.5
+  time_scale: 1e-3
+  skip_lidar_num: 0
+  point_filter_num: 10
+  max_iteration: 6
+  filter_size_scan: 0.5
+  filter_size_map: 0.5
+  ivox_grid_resolution: 0.5
+  ivox_nearby_type: 18
+  esti_plane_threshold: 0.1
+  use_aa: true
   acc_cov: 0.1
   gyr_cov: 0.1
   b_acc_cov: 0.0001
   b_gyr_cov: 0.0001
-  extrinsic_est_en: false      # true: enable the online estimation of IMU-LiDAR extrinsic
+  extrinsic_est_en: false
   extrinsic_T: [ 0, 0, 0 ]
-  extrinsic_R: [ 1, 0, 0,
-                 0, 1, 0,
-                 0, 0, 1 ]
-
+  extrinsic_R: [ 1, 0, 0, 0, 1, 0, 0, 0, 1 ]
   keep_first_imu_estimation: true
   
-  # Enable PGFF enhancements
-  enable_pgff: false
+  # ENABLE PGFF for testing
+  enable_pgff: true
 
 g2p5:
-  esti_floor: false   # 是否动态估计地面
-  lidar_height: 0.0   # 雷达安装高度
-  floor_height: -1.2   # 默认地面高度
-  min_th_floor: 0.50  # 距离地面这个高度的障碍物被扫入栅格地图中
-  max_th_floor: 1.0  # 距离地面这个高度的障碍物被扫入栅格地图中
-  grid_map_resolution: 0.2 # 栅格地图分辨率 (balanced for stability)
+  esti_floor: false
+  lidar_height: 0.0
+  floor_height: -1.2
+  min_th_floor: 0.50
+  max_th_floor: 1.0
+  grid_map_resolution: 0.2
 
 system:
-  with_loop_closing: true # 是否需要回环检测
-  with_ui: true  # 是否需要3D UI
-  with_2dui: false # 是否需要2D UI
-  with_g2p5: true # 是否需要栅格地图
-  step_on_kf: false # 是否在关键帧处暂停
-
+  with_loop_closing: true
+  with_ui: true
+  with_2dui: false
+  with_g2p5: true
+  step_on_kf: false
   enable_lidar_loc_skip: false
   enable_lidar_loc_rviz: false
   enable_lidar_odom_skip: false
