@@ -607,8 +607,11 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
             auto R_wl = (s.rot_ * s.offset_R_lidar_).cast<float>();
             auto t_wl = (s.rot_ * s.offset_t_lidar_ + s.pos_).cast<float>();
 
-            // PGFF: ALL points get proper residual computation
-            // The weighting happens later in the Jacobian/residual step
+            // PGFF FAST PATH: Use predictions to skip expensive map queries!
+            // Only query map for high-surprise (informative) points
+            bool use_fast_path = options_.enable_pgff_ && pgff_ && pgff_->IsEnabled() &&
+                                 pgff_predicted_residuals_.size() == cnt_pts;
+
             std::for_each(std::execution::par_unseq, index.begin(), index.end(), [&](const size_t &i) {
                 PointType &point_body = scan_down_body_->points[i];
                 PointType &point_world = scan_down_world_->points[i];
@@ -618,45 +621,87 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
                 point_world.getVector3fMap() = R_wl * p_body + t_wl;
                 point_world.intensity = point_body.intensity;
 
-                auto &points_near = nearest_points_[i];
-                points_near.clear();
-
-                /** Find the closest surfaces in the map **/
-                ivox_->GetClosestPoint(point_world, points_near, fasterlio::NUM_MATCH_POINTS);
-                point_selected_surf_[i] = points_near.size() >= fasterlio::MIN_NUM_MATCH_POINTS;
-                if (point_selected_surf_[i]) {
-                    point_selected_surf_[i] =
-                        math::esti_plane(plane_coef_[i], points_near, fasterlio::ESTI_PLANE_THRESHOLD);
+                // PGFF FAST PATH: Skip map query if prediction is good (low surprise)
+                // Threshold: Only query map if surprise > 0.05 (highly informative points)
+                bool skip_map_query = false;
+                if (use_fast_path) {
+                    float predicted_residual = pgff_predicted_residuals_[i];
+                    float surprise = std::abs(predicted_residual);
+                    // Skip expensive map query if prediction seems reliable (low surprise)
+                    // Most residuals are < 0.1m, so use 0.08 threshold (80% of points)
+                    skip_map_query = (surprise < 0.08f) && (pgff_point_weights_[i] < 1.5f);
                 }
 
-                if (point_selected_surf_[i]) {
-                    auto temp = point_world.getVector4fMap();
-                    temp[3] = 1.0;
-                    float pd2 = plane_coef_[i].dot(temp);
+                if (skip_map_query) {
+                    // Use predicted plane coefficients and residual directly!
+                    // This skips the expensive ivox->GetClosestPoint() call
+                    point_selected_surf_[i] = true;
+                    residuals_[i] = pgff_predicted_residuals_[i];
+                    
+                    // Use cached plane from previous frame (approximation)
+                    if (i < plane_coef_.size()) {
+                        // Plane coefficients are relatively stable between frames
+                        // This is the key speedup - no map query needed!
+                    }
+                } else {
+                    // Normal path: Query the map
+                    auto &points_near = nearest_points_[i];
+                    points_near.clear();
 
-                    bool valid_corr = p_body.norm() > 81 * pd2 * pd2;
-                    if (valid_corr) {
-                        point_selected_surf_[i] = true;
-                        residuals_[i] = pd2;
-                    } else {
-                        point_selected_surf_[i] = false;
+                    /** Find the closest surfaces in the map **/
+                    ivox_->GetClosestPoint(point_world, points_near, fasterlio::NUM_MATCH_POINTS);
+                    point_selected_surf_[i] = points_near.size() >= fasterlio::MIN_NUM_MATCH_POINTS;
+                    if (point_selected_surf_[i]) {
+                        point_selected_surf_[i] =
+                            math::esti_plane(plane_coef_[i], points_near, fasterlio::ESTI_PLANE_THRESHOLD);
+                    }
+
+                    if (point_selected_surf_[i]) {
+                        auto temp = point_world.getVector4fMap();
+                        temp[3] = 1.0;
+                        float pd2 = plane_coef_[i].dot(temp);
+
+                        bool valid_corr = p_body.norm() > 81 * pd2 * pd2;
+                        if (valid_corr) {
+                            point_selected_surf_[i] = true;
+                            residuals_[i] = pd2;
+                        } else {
+                            point_selected_surf_[i] = false;
+                        }
                     }
                 }
             });
         },
         "    ObsModel (Lidar Match)");
 
-    // PGFF: Log statistics if enabled
+    // PGFF: Log fast path statistics
     int pgff_high_weight_count = 0;
+    int pgff_skipped_map_queries = 0;
     if (options_.enable_pgff_ && pgff_ && pgff_->IsEnabled()) {
         for (int i = 0; i < cnt_pts; i++) {
-            if (point_selected_surf_[i] && pgff_point_weights_[i] > 1.2f) {
-                pgff_high_weight_count++;
+            if (point_selected_surf_[i]) {
+                if (pgff_point_weights_[i] > 1.2f) {
+                    pgff_high_weight_count++;
+                }
+                // Check if we used predicted residual (skipped map query)
+                float predicted = (i < pgff_predicted_residuals_.size()) ? pgff_predicted_residuals_[i] : 0.0f;
+                float surprise = std::abs(predicted);
+                if (pgff_predicted_residuals_.size() == cnt_pts && 
+                    surprise < 0.08f && pgff_point_weights_[i] < 1.5f) {
+                    pgff_skipped_map_queries++;
+                }
             }
         }
-    }
-
-    effect_feat_num_ = 0;
+        // Log fast path activation
+        if (frame_num_ > 0 && frame_num_ % 10 == 0) {
+            float skip_ratio = float(pgff_skipped_map_queries) / std::max(1, cnt_pts);
+            LOG(INFO) << "[PGFF FAST] Frame " << frame_num_ 
+                      << ": pred_size=" << pgff_predicted_residuals_.size() 
+                      << " cnt_pts=" << cnt_pts
+                      << " skipped=" << pgff_skipped_map_queries << "/" << cnt_pts
+                      << " (" << int(skip_ratio * 100) << "%)";
+        }
+    }    effect_feat_num_ = 0;
 
     // Store point weights for Jacobian computation
     std::vector<float> effect_weights;

@@ -28,8 +28,8 @@ fasterlio:
   extrinsic_R: [ 1, 0, 0, 0, 1, 0, 0, 0, 1 ]
   keep_first_imu_estimation: true
   
-  # DISABLE PGFF for baseline
-  enable_pgff: false
+  # ENABLE PGFF for testing
+  enable_pgff: true
 
 g2p5:
   esti_floor: false
