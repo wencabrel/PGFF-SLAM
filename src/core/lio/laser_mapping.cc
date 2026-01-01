@@ -593,13 +593,37 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
         index[i] = i;
     }
 
-    // PGFF: Compute point weights based on surprise scores
-    // Higher surprise = higher weight (more informative points)
+    // PGFF: Selective point processing - skip predictable points before expensive map queries
     if (options_.enable_pgff_ && pgff_ && pgff_->IsEnabled()) {
+        // Predict residuals for current scan based on flow field
+        std::vector<float> predicted_residuals;
+        pgff_->PredictResiduals(scan_down_body_, s, predicted_residuals);
+        
+        // Select which points need processing (high surprise = informative)
+        auto selected_indices = pgff_->SelectPointsToProcess(scan_down_body_, predicted_residuals);
+        
+        // Mark all points as unselected initially
+        point_selected_surf_.assign(cnt_pts, false);
+        
+        // Mark selected (high-surprise) points for processing
+        for (int idx : selected_indices) {
+            if (idx >= 0 && idx < cnt_pts) {
+                point_selected_surf_[idx] = true;
+            }
+        }
+        
+        // Compute weights (uniform for now, could be made adaptive later)
         ComputePGFFWeights(cnt_pts);
+        
+        if (frame_num_ % 50 == 0) {
+            LOG(INFO) << "[PGFF] Frame " << frame_num_ 
+                      << ": processing " << selected_indices.size() << "/" << cnt_pts 
+                      << " points (" << (100.0 * selected_indices.size() / cnt_pts) << "%)";
+        }
     } else {
-        // Default: all points have equal weight
+        // Default: all points have equal weight and will be processed
         pgff_point_weights_.assign(cnt_pts, 1.0f);
+        point_selected_surf_.assign(cnt_pts, true);
     }
 
     Timer::Evaluate(
@@ -615,6 +639,12 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
                 Vec3f p_body = point_body.getVector3fMap();
                 point_world.getVector3fMap() = R_wl * p_body + t_wl;
                 point_world.intensity = point_body.intensity;
+
+                // Skip if PGFF already marked this point as low-information
+                if (!point_selected_surf_[i]) {
+                    residuals_[i] = 0.0f;
+                    return;
+                }
 
                 // Query the map for correspondences
                 auto &points_near = nearest_points_[i];
