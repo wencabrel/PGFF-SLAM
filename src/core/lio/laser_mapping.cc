@@ -585,45 +585,18 @@ void LaserMapping::MapIncremental() {
 void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
     int cnt_pts = scan_down_body_->size();
 
-    /// 地面约束: 如果有floor constraint, 增加一个虚拟观测
-    bool apply_floor_constraint = has_floor_constraint_ && (frame_num_ % 10 == 0);  // 每10帧应用一次
-
     std::vector<size_t> index(cnt_pts);
     for (size_t i = 0; i < index.size(); ++i) {
         index[i] = i;
     }
 
-    // PGFF: Selective point processing - skip predictable points before expensive map queries
+    // PGFF: Compute point weights based on surprise scores
+    // Higher surprise = higher weight (more informative points)
     if (options_.enable_pgff_ && pgff_ && pgff_->IsEnabled()) {
-        // Predict residuals for current scan based on flow field
-        std::vector<float> predicted_residuals;
-        pgff_->PredictResiduals(scan_down_body_, s, predicted_residuals);
-        
-        // Select which points need processing (high surprise = informative)
-        auto selected_indices = pgff_->SelectPointsToProcess(scan_down_body_, predicted_residuals);
-        
-        // Mark all points as unselected initially
-        point_selected_surf_.assign(cnt_pts, false);
-        
-        // Mark selected (high-surprise) points for processing
-        for (int idx : selected_indices) {
-            if (idx >= 0 && idx < cnt_pts) {
-                point_selected_surf_[idx] = true;
-            }
-        }
-        
-        // Compute weights (uniform for now, could be made adaptive later)
         ComputePGFFWeights(cnt_pts);
-        
-        if (frame_num_ % 50 == 0) {
-            LOG(INFO) << "[PGFF] Frame " << frame_num_ 
-                      << ": processing " << selected_indices.size() << "/" << cnt_pts 
-                      << " points (" << (100.0 * selected_indices.size() / cnt_pts) << "%)";
-        }
     } else {
-        // Default: all points have equal weight and will be processed
+        // Default: all points have equal weight
         pgff_point_weights_.assign(cnt_pts, 1.0f);
-        point_selected_surf_.assign(cnt_pts, true);
     }
 
     Timer::Evaluate(
@@ -640,13 +613,8 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
                 point_world.getVector3fMap() = R_wl * p_body + t_wl;
                 point_world.intensity = point_body.intensity;
 
-                // Skip if PGFF already marked this point as low-information
-                if (!point_selected_surf_[i]) {
-                    residuals_[i] = 0.0f;
-                    return;
-                }
-
-                // Query the map for correspondences
+                // PGFF: ALL points get proper residual computation
+                // The weighting happens later in the Jacobian/residual step
                 auto &points_near = nearest_points_[i];
                 points_near.clear();
 
@@ -709,30 +677,6 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
     corr_pts_.resize(effect_feat_num_);
     corr_norm_.resize(effect_feat_num_);
     effect_weights.resize(effect_feat_num_);
-
-    // 地面约束: Z漂移约束（假设地面车辆，Z不应该大幅变化）
-    if (apply_floor_constraint) {
-        // 简单策略: 假设初始Z是正确的，约束Z不要漂移
-        static double initial_z = s.pos_[2];  // 第一次记录初始Z
-        
-        // 添加一个Z轴观测，期望Z保持在initial_z附近
-        Vec4d floor_norm;
-        floor_norm << 0, 0, 1, 0;  // Z轴方向
-        corr_norm_.push_back(floor_norm.cast<float>());
-        
-        Vec4f virtual_pt;
-        virtual_pt << 0, 0, 0, 0;
-        virtual_pt[3] = -(s.pos_[2] - initial_z);  // residual: 当前Z与初始Z的差
-        corr_pts_.push_back(virtual_pt);
-        
-        effect_weights.push_back(2.0f);  // 软约束
-        effect_feat_num_++;
-        
-        if (frame_num_ % 500 == 0) {
-            LOG(INFO) << "[Z-CONSTRAINT] Frame " << frame_num_ << " - Current Z: " << s.pos_[2] 
-                      << " Initial Z: " << initial_z << " Drift: " << (s.pos_[2] - initial_z);
-        }
-    }
 
     if (effect_feat_num_ < 1) {
         obs.valid_ = false;
