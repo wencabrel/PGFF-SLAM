@@ -1,11 +1,34 @@
+# Build directories
 *build
+*build_test
 *install
 *log
-*.vscode
-*libs
-**data
-**/.vscode/
 bin
 
+# IDE
+*.vscode
+**/.vscode/
+
+# Libraries
+*libs
+*.so
+*.a
+*.o
+
+# Data files (large datasets)
+**data
+*.db3
+*.pcd
+*.bag
+
+# Large media files
+*.gif
+doc/*.gif
+doc/*.mp4
+doc/*.avi
+
+# CMake
 **cmake-build-debug**
 **cmake-build-release**
+CMakeCache.txt
+CMakeFiles/
