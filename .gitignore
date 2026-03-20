@@ -32,3 +32,29 @@ doc/*.avi
 **cmake-build-release**
 CMakeCache.txt
 CMakeFiles/
+
+# Benchmark tools (nested repositories)
+vbr-slam-benchmark/
+
+# PGFF paper figures and visualizations
+results/*.png
+results/*.jpg
+results/*.pdf
+fig*.png
+fig*.jpg
+fig*.pdf
+frame*.png
+frame*.jpg
+*pgff*.png
+*pgff*.jpg
+*pgff*.pdf
+*trajectory*.png
+*multi_hypothesis*.png
+*parameter_sensitivity*.png
+*runtime_scaling*.png
+*uncertainty_calibration*.png
+*precision_recall*.png
+*failure_analysis*.png
+*particle_diagnostics*.png
+*feature_weighting*.png
+*loop_closure*.png
