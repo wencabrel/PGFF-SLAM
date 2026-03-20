@@ -1,533 +1,359 @@
 # PGFF: Particle-Guided Feature Fusion for Robust SLAM
 
-**From Particle to Features: Uncertainty-Guided Geometric Reasoning for Robust SLAM**
+**From Particles to Features: Uncertainty-Guided Geometric Reasoning for Robust SLAM**
+
+---
+
+## Quick Start
+
+```bash
+# 1. Install dependencies
+bash scripts/install_dep.sh
+
+# 2. Build
+bash scripts/build_pgff.sh && source install/setup.bash
+
+# 3. Run on example dataset
+./bin/run_slam_offline --config config/pgff_vbr.yaml --bag data/VBR/campus/ros2.db3
+```
+
+**See [Getting Started](#getting-started) for detailed instructions.**
+
+---
+
+## Table of Contents
+- [Overview](#overview)
+- [Main Contributions](#main-contributions)
+- [System Pipeline](#system-pipeline)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Build](#build)
+  - [Running PGFF](#running-pgff)
+  - [Configuration](#configuration-files)
+  - [Output Files](#output-files)
+  - [Visualization](#visualization)
+  - [Troubleshooting](#troubleshooting)
+- [Method Summary](#method-summary)
+- [Experimental Results](#experimental-results)
+- [Key Parameters](#key-parameters-reported-in-the-paper)
+- [Limitations](#limitations)
+- [Citation](#citation)
+
+---
 
 ## Overview
 
-PGFF (Particle-Guided Feature Fusion) is a groundbreaking framework that inverts the classical role of particles in SLAM systems. Instead of sampling robot poses, **particles propagate through feature space** to compute importance weights that guide geometric reasoning under uncertainty.
+Particle-Guided Feature Fusion (PGFF) is a LiDAR-inertial SLAM framework that shifts uncertainty handling from pose sampling to feature reasoning. Instead of using particles to sample robot poses, PGFF propagates particles through feature space to estimate correspondence reliability and guide geometric weighting. This creates bidirectional information flow between state estimation and feature selection. 
 
-### The Core Innovation
+The paper’s central argument is that SLAM often treats state estimation probabilistically while leaving feature extraction and loop closure deterministic. PGFF addresses that asymmetry by making feature weighting uncertainty-aware.
 
-Traditional SLAM systems face a fundamental tension: they must commit to feature correspondences and loop closure decisions under uncertainty, yet incorrect commitments cascade into catastrophic mapping failures. PGFF solves this by bringing probabilistic reasoning into the feature extraction stage itself — not just state estimation.
+![Figure 1: Traditional LiDAR-inertial odometry versus the proposed PGFF framework.](doc/figure1.jpg)
 
-**Key Paradigm Shift:**
-- **Traditional:** Particles sample poses → Features extracted uniformly → State update
-- **PGFF:** Features extracted → Particles vote on feature reliability → Weighted state update
+*Figure 1.  Comparison of (a) traditional LiDAR-inertial odometry pipelines and (b) the proposed PGFF framework. Traditional approaches treat feature extraction
+as deterministic preprocessing with one-way information flow.*
 
----
+## Main Contributions
 
-## Why PGFF?
+1. **Geometric surprise prior**
+   - Computes local geometric descriptors from neighborhood eigenvalue structure.
+   - Uses information-theoretic divergence to score how informative a point is relative to its local region.
+   - Emphasizes corners, edges, and structural discontinuities while suppressing redundant planar regions.
 
-### The Problem
+2. **Particle-based adaptive weighting**
+   - Uses particles to vote on correspondence reliability.
+   - High consensus means a feature is reliable; disagreement means it is ambiguous or likely unreliable.
+   - Final feature weights combine geometric surprise and particle consensus.
 
-Existing LiDAR-SLAM methods treat all extracted features equally, making them vulnerable to:
-- **Geometric degeneracy** (corridors, tunnels, symmetric structures)
-- **Feature outliers** (dynamic objects, reflections, sensor noise)
-- **Perceptual aliasing** (similar-looking but different places)
-- **Premature loop closure** (committing to wrong correspondences)
+3. **Multi-hypothesis loop closure**
+   - Maintains competing loop-closure hypotheses instead of committing immediately.
+   - Accumulates evidence over time and commits only when the posterior ratio exceeds the decision threshold.
+   - Reduces catastrophic false positives in perceptually aliased environments.
 
-### The Solution
+## System Pipeline
 
-PGFF introduces **uncertainty-guided feature reasoning** through three key innovations:
+![Figure 2: PGFF system architecture and data flow.](doc/figure2.jpg)
 
-1. **Geometric Surprise Priors** 
-   - Detect informative features through local eigenvalue analysis
-   - Information-theoretic divergence measures deviation from expected geometry
-   - Points violating local expectations carry more information
+*Figure 2. System architecture of PGFF.*
 
-2. **Adaptive Feature Weighting**
-   - Particles vote on correspondence reliability
-   - Consensus → high weight; disagreement → low weight
-   - Maintains diversity in uncertain regions via adaptive resampling
-
-3. **Multi-Hypothesis Loop Closure**
-   - Maintains competing closure candidates until sufficient evidence accumulates
-   - Avoids premature commitment to wrong loop closures
-   - Lightweight: only stores relative transforms, not full graphs
-
----
-
-## System Architecture
-
-```
+```text
 LiDAR + IMU
-     ↓
-┌────────────────────────────────────┐
-│  Point Cloud Preprocessing         │
-└────────────────────────────────────┘
-     ↓
-┌────────────────────────────────────┐
-│  PGFF Feature Weighting            │
-│  ┌──────────────────────────────┐  │
-│  │ Geometric Surprise Prior     │  │
-│  │ - Eigenvalue decomposition   │  │
-│  │ - KL divergence computation  │  │
-│  └──────────────────────────────┘  │
-│  ┌──────────────────────────────┐  │
-│  │ Particle-Based Weighting     │  │
-│  │ - Particle initialization    │  │
-│  │ - Consensus voting          │  │
-│  │ - Adaptive resampling       │  │
-│  └──────────────────────────────┘  │
-└────────────────────────────────────┘
-     ↓
-┌────────────────────────────────────┐
-│  IEKF State Estimation (Weighted) │
-└────────────────────────────────────┘
-     ↓
-┌────────────────────────────────────┐
-│  Multi-Hypothesis Loop Closure     │
-│  - Hypothesis creation/branching   │
-│  - Evidence accumulation          │
-│  - Bayesian commitment decision   │
-└────────────────────────────────────┘
-     ↓
-┌────────────────────────────────────┐
-│  Pose Graph Optimization          │
-└────────────────────────────────────┘
+   ↓
+Point Cloud Preprocessing
+   ↓
+PGFF Feature Weighting
+   ├─ Geometric Surprise Prior
+   └─ Particle Consensus Voting
+   ↓
+Weighted IEKF State Estimation
+   ↓
+Multi-Hypothesis Loop Closure
+   ↓
+Pose Graph Optimization
 ```
+
+PGFF is integrated into a tightly coupled LiDAR-inertial odometry pipeline built on an iterated extended Kalman filter (IEKF).
 
 ---
 
-## Key Features
-
-### 1. Geometric Surprise Prior
-
-Quantifies how "unexpected" each point is based on local geometry:
-
-```cpp
-// Local geometric features
-Planarity (P) = (λ₂ - λ₃) / λ₁
-Linearity (L) = (λ₁ - λ₂) / λ₁
-Scatterness (S) = λ₃ / λ₁
-
-// Information-theoretic surprise
-Surprise = D_KL(p_observed || p_expected)
-```
-
-**Why it matters:** 
-- Corners and edges have high surprise (informative for registration)
-- Flat walls have low surprise (less reliable for matching)
-- Automatically adapts to scene geometry
-
-### 2. Particle-Based Feature Weighting
-
-Particles maintain hypotheses about feature reliability:
-
-```cpp
-// Each particle represents a hypothesis
-Particle {
-  position: feature space location
-  weight: correspondence confidence
-}
-
-// Consensus-based weighting
-w_i = Σ_m δ(consensus_m) * ω^(m)
-
-// Effective sample size triggers resampling
-N_eff = 1 / Σ (ω^(m))²
-if N_eff < γ * M:
-    resample()
-```
-
-**Why it matters:**
-- Multiple particles = multiple correspondence hypotheses
-- Low consensus = high uncertainty → downweight feature
-- Maintains diversity in ambiguous regions
-
-### 3. Multi-Hypothesis Loop Closure
-
-Defers commitment until evidence is overwhelming:
-
-```cpp
-// Hypothesis management
-for each loop candidate:
-    create hypothesis h_i
-    
-for each new frame:
-    for each hypothesis h_i:
-        P(h_i | z_t) ∝ P(z_t | h_i) * P(h_i | z_{1:t-1})
-    
-// Commit only when confident
-if P(h_i) / P(h_j) > τ for all j ≠ i:
-    commit to h_i
-elif P(h_i) < ε:
-    reject h_i
-```
-
-**Why it matters:**
-- No premature commitment to wrong loop closures
-- Recovers gracefully from ambiguous situations
-- Critical in symmetric/repetitive environments
-
----
-
-## Performance
-
-### Benchmarks
-
-Evaluated on challenging outdoor datasets (VBR Campus, NCLT):
-
-| Metric | FAST-LIO2 | LIO-SAM | PGFF (Ours) | Improvement |
-|--------|-----------|---------|-------------|-------------|
-| **ATE (m)** | 0.52 | 0.48 | **0.35** | **27% ↓** |
-| **Loop Closure Precision** | 0.82 | 0.85 | **0.94** | **15% ↑** |
-| **Runtime (ms/frame)** | 38.2 | 45.1 | **34.3** | **10% ↓** |
-| **Failed Loop Closures** | 12 | 8 | **2** | **75% ↓** |
-
-### Key Results
-
-- ✅ **27% lower trajectory error** in geometric degenerate scenarios
-- ✅ **10.1% faster** state estimation through selective feature processing
-- ✅ **94% loop closure precision** vs 82-85% for baselines
-- ✅ **Robust to perceptual aliasing** (corridors, parking lots, tunnels)
-- ✅ **Handles dynamic scenes** better through surprise-based filtering
-
----
-
-## Installation & Usage
+## Getting Started
 
 ### Prerequisites
 
+**System Requirements:**
+- Ubuntu 20.04 / 22.04 (ROS2 Foxy/Humble)
+- C++17 compiler (gcc 9.0+)
+- 8GB+ RAM recommended
+
+**Install Dependencies:**
+
 ```bash
-# ROS2 (Foxy, Humble, or later)
-# C++17 compiler
-# Dependencies
-sudo apt install libeigen3-dev libgtest-dev libyaml-cpp-dev
+# Install ROS2 (if not already installed)
+# Follow: https://docs.ros.org/en/humble/Installation.html
+
+# Install required packages
+sudo apt update
+sudo apt install libopencv-dev libpcl-dev pcl-tools \
+                 libyaml-cpp-dev libgoogle-glog-dev libgflags-dev \
+                 ros-humble-pcl-conversions libeigen3-dev
+
+# Or use the provided script
+cd lightning-lm
+bash scripts/install_dep.sh
 ```
 
 ### Build
 
 ```bash
-cd lightning-lm
-./scripts/build_pgff.sh
-# Or manually:
-colcon build --packages-select lightning --cmake-args -DCMAKE_BUILD_TYPE=Release
+# Method 1: Using the provided build script
+bash scripts/build_pgff.sh
+
+# Method 2: Manual build with colcon
+source /opt/ros/humble/setup.bash
+colcon build --packages-select lightning \
+  --cmake-args -DCMAKE_BUILD_TYPE=Release
+
+# Source the workspace
+source install/setup.bash
 ```
 
-### Configuration
+### Running PGFF
 
-PGFF can be enabled/disabled in config files:
+#### 1. SLAM Mode (Offline with ROS2 Bag)
 
-```yaml
-# config/pgff_default.yaml
-fasterlio:
-  enable_pgff: true  # Enable PGFF framework
-  
-pgff:
-  predictive_lio:
-    enabled: true
-    lookahead_time: 0.05
-    surprise_percentile: 0.25  # Process top 25% surprising points
-    
-  information_frontier:
-    enabled: true
-    grid_size: 0.5
-    surprise_window: 50
-    
-  learned_surprise:
-    enabled: true
-    corridor_threshold: 0.12
-    open_threshold: 0.25
-```
-
-### Running
+Process a recorded dataset to build a map:
 
 ```bash
-# SLAM mode with PGFF
-./bin/run_slam_offline --config config/pgff_vbr.yaml --bag data/VBR/campus/ros2.db3
+# VBR dataset with PGFF enabled
+./bin/run_slam_offline \
+  --config config/pgff_vbr.yaml \
+  --bag data/VBR/campus/ros2.db3
+
+# NCLT dataset
+./bin/run_slam_offline \
+  --config config/pgff_nclt.yaml \
+  --bag data/NCLT/20120115.db3
 
 # Baseline mode (PGFF disabled for comparison)
-./bin/run_slam_offline --config config/baseline_vbr.yaml --bag data/VBR/campus/ros2.db3
-
-# Localization mode
-./bin/run_loc_offline --config config/pgff_vbr.yaml --map data/maps/campus.pcd
+./bin/run_slam_offline \
+  --config config/baseline_vbr.yaml \
+  --bag data/VBR/campus/ros2.db3
 ```
 
----
+#### 2. SLAM Mode (Online with Live Sensor)
 
-## Datasets
-
-### Supported Formats
-
-- **VBR Campus Dataset** (primary evaluation)
-  - 43GB ROS2 bag format
-  - Outdoor urban environment
-  - 600+ frames with ground truth
-  - Mixed corridors/open/buildings
-
-- **NCLT Dataset** 
-  - Long-term autonomous driving
-  - Seasonal changes
-  - Large-scale (> 5km loops)
-
-- **Custom ROS2 Bags**
-  - PointCloud2 topic: configurable
-  - IMU topic: configurable
-  - Supports Ouster, Velodyne, Livox LiDARs
-
-### Data Preprocessing
-
-Extract frames from ROS2 bags:
+Real-time SLAM with live LiDAR/IMU:
 
 ```bash
-# Extract specific frame for visualization
-python3 scripts/extract_frame_from_bag.py 450 \
-  --bag data/VBR/campus/ros2.db3 \
-  --topic /ouster/points \
-  --output-dir data/extracted_frames
+# Make sure ROS2 is publishing sensor data
+# Topics: /ouster/points (LiDAR), /imu/data (IMU)
+
+./bin/run_slam_online --config config/pgff_vbr.yaml
 ```
 
----
+#### 3. Localization Mode (Pre-built Map)
 
-## Visualization & Analysis
-
-### Particle Diagnostics
-
-Monitor particle filter health:
+Localize against an existing map:
 
 ```bash
-# Generate N_eff over time + weight concentration histogram
-python3 scripts/visualize_particle_diagnostics.py \
-  --output results/fig_particle_diagnostics.png --dpi 800
+# First, save a map from SLAM mode
+# (Map saved automatically in data/maps/)
+
+# Offline localization
+./bin/run_loc_offline \
+  --config config/pgff_vbr.yaml \
+  --map data/maps/campus.pcd \
+  --bag data/VBR/test_sequence.db3
+
+# Online localization
+./bin/run_loc_online \
+  --config config/pgff_vbr.yaml \
+  --map data/maps/campus.pcd
 ```
 
-**What to look for:**
-- N_eff drops in corridors (geometric degeneracy) → triggers resampling
-- Weight concentration higher in corridors vs open areas
-- Resampling events correlate with environment transitions
+#### 4. Loop Closure Only Mode
 
-### Feature Weighting Visualization
+Process loop closures on pre-computed odometry:
 
 ```bash
-# Visualize PGFF feature weighting on real data
-python3 scripts/visualize_pgff_weights.py \
-  --input data/extracted_frames/frame_450.pcd \
-  --output results/fig_feature_weighting.png --dpi 800
+./bin/run_loop_offline \
+  --config config/pgff_vbr.yaml \
+  --input data/odometry.txt
 ```
 
-**Shows:**
-- (a) Raw LiDAR scan
-- (b) Geometric surprise values (information-theoretic)
-- (c) Particle consensus scores
-- (d) Combined PGFF weights (final feature importance)
+### Configuration Files
 
-### Parameter Sensitivity
+Different configurations for various use cases:
 
-```bash
-# Analyze robustness across parameters
-python3 scripts/visualize_parameter_sensitivity.py \
-  --output results/fig_parameter_sensitivity.png
-```
+| Config File | Description | Use Case |
+|-------------|-------------|----------|
+| `pgff_vbr.yaml` | PGFF enabled, VBR dataset | Main PGFF evaluation |
+| `pgff_nclt.yaml` | PGFF enabled, NCLT dataset | Long-term outdoor SLAM |
+| `baseline_vbr.yaml` | PGFF disabled | Baseline comparison |
+| `pgff_default.yaml` | PGFF with default params | Generic LiDAR SLAM |
+| `default_livox.yaml` | Standard config for Livox | Livox Mid-360 sensors |
 
----
+### Key Configuration Parameters
 
-## Configuration Parameters
-
-### PGFF Core Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `enable_pgff` | `true` | Master switch for PGFF framework |
-| `lookahead_time` | `0.05s` | Prediction horizon for motion model |
-| `surprise_percentile` | `0.25` | Process top 25% surprising points |
-| `num_particles` | `50` | Particle count (M) for voting |
-| `gamma` | `0.5` | Resampling threshold (γM) |
-| `consensus_sharpness` | `2.0` | β parameter for consensus weighting |
-
-### Loop Closure Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `enable_multi_hypothesis` | `true` | Multi-hypothesis loop closure |
-| `commitment_threshold` | `10.0` | Evidence ratio τ for commitment |
-| `rejection_threshold` | `0.01` | Probability ε for rejection |
-| `max_hypotheses` | `5` | Maximum concurrent hypotheses |
-| `use_pgff_surprise` | `true` | Use surprise for early loop triggering |
-
-### Surprise Prior Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `corridor_threshold` | `0.12` | Surprise threshold for corridors |
-| `open_threshold` | `0.25` | Surprise threshold for open areas |
-| `grid_size` | `0.5m` | Spatial grid resolution |
-| `surprise_window` | `50` | Frames for surprise history |
-
----
-
-## Understanding PGFF Output
-
-### Key Metrics
-
-**During Runtime:**
-```
-[PGFF] Frame 450:
-  Raw points: 65536
-  After surprise filter: 9300 (14.2%)
-  N_eff: 38.2 / 50
-  Geometric surprise: 0.31
-  Consensus: High (0.87)
-  Resampling: Not triggered
-```
-
-**Interpretation:**
-- `Raw points` → `After surprise filter`: PGFF processing only top 14% informative features
-- `N_eff`: 38.2/50 particles effective (healthy, > 25 threshold)
-- `Geometric surprise`: 0.31 (moderate, open environment)
-- `Consensus`: 0.87 (high agreement among particles → reliable features)
-
-### Loop Closure Events
-
-```
-[Loop Closure] Hypothesis 3:
-  Evidence ratio: 12.4 > 10.0 (threshold)
-  → COMMITTED to loop closure
-  Frames: 450 ↔ 127
-  Relative pose: [x=2.1m, y=0.3m, θ=0.05rad]
-```
-
----
-
-## Technical Details
-
-### Computational Complexity
-
-- **Geometric Surprise**: O(n·k) where n = points, k = neighbors (typically k=20)
-- **Particle Weighting**: O(n·M) where M = particle count (typically M=50)
-- **Overall**: O(n·(k + M)) ≈ O(70n) with defaults
-  
-**Optimization:**
-- Lazy evaluation: only compute for candidate features
-- iVox for O(1) neighbor search
-- Particle count adaptation based on scene complexity
-
-### Memory Usage
-
-```
-Per-frame overhead:
-  Particles: 50 × 16 bytes = 800 bytes
-  Surprise cache: n × 4 bytes
-  Hypothesis tracking: ~200 bytes/hypothesis
-  
-Total: ~5KB additional per frame (negligible)
-```
-
-### Threading Model
-
-```
-Main Thread:
-  ├─ Point Cloud Preprocessing
-  ├─ Geometric Surprise Computation (parallel)
-  └─ IEKF State Update
-  
-Background Thread 1:
-  └─ Particle Weight Propagation
-  
-Background Thread 2:
-  └─ Loop Closure Hypothesis Management
-  
-Background Thread 3:
-  └─ Visualization & Logging
-```
-
----
-
-## Troubleshooting
-
-### Common Issues
-
-**Q: N_eff always low (< 10)**
-- Increase particle count M (try 100-150)
-- Lower γ threshold (try 0.3)
-- Check if sensor data is noisy
-
-**Q: Too many resampling events**
-- Increase γ threshold (try 0.7)
-- Reduce surprise sensitivity
-- Verify point cloud quality
-
-**Q: Loop closures not triggered**
-- Lower `corridor_threshold` for surprise
-- Increase `max_loop_gap` 
-- Check `use_pgff_surprise` is enabled
-
-**Q: Wrong loop closures committed**
-- Increase `commitment_threshold` τ (try 15-20)
-- Enable `enable_multi_hypothesis`
-- Verify ground truth for false positives
-
-### Debug Mode
-
-Enable verbose logging:
+Edit config files to tune PGFF behavior:
 
 ```yaml
 fasterlio:
-  log_level: "DEBUG"
-  pgff_verbose: true
+  enable_pgff: true          # Master switch for PGFF
+
+  # Core PGFF parameters (typical defaults)
+  # Note: These are in the C++ code, not all exposed in YAML
+  # Particle count: M = 50
+  # Resampling threshold: γ = 0.5
+  # Consensus sharpness: β = 2.0
+
+system:
+  with_loop_closing: true    # Enable multi-hypothesis loop closure
+  with_ui: true              # Enable visualization (Pangolin)
+  with_2dui: false           # 2D bird's-eye view UI
 ```
 
-Outputs detailed particle states, surprise values, and hypothesis evolution.
+### Output Files
 
----
-
-## Development & Contributing
-
-### Code Structure
+After running, results are saved in:
 
 ```
 lightning-lm/
-├── src/core/
-│   ├── lio/laser_mapping.cc        # PGFF integration point
-│   └── loop_closing/loop_closing.cc # Multi-hypothesis management
-├── src/core/pgff/                  # PGFF implementation (if separate)
-├── config/
-│   ├── pgff_default.yaml           # PGFF default parameters
-│   ├── pgff_vbr.yaml               # VBR dataset config
-│   └── baseline_vbr.yaml           # Baseline (PGFF disabled)
-├── scripts/
-│   ├── build_pgff.sh               # Build script
-│   ├── extract_frame_from_bag.py   # Data extraction
-│   ├── visualize_particle_diagnostics.py
-│   └── visualize_pgff_weights.py
-└── doc/
-    |
-    └── README.md                    # This file
+├── results/
+│   ├── trajectory.txt       # Estimated poses (TUM format)
+│   ├── loop_closures.txt    # Detected loop closures
+│   └── metrics.txt          # ATE, RPE, timing stats
+├── data/maps/
+│   └── <session_name>.pcd   # Saved point cloud map
+└── log/
+    └── pgff_runtime.log     # Detailed PGFF logs
 ```
 
-### Running Tests
+**Trajectory format (TUM):**
+```
+# timestamp x y z qx qy qz qw
+1234567890.123 1.0 2.0 0.1 0.0 0.0 0.0 1.0
+...
+```
 
+### Visualization
+
+While running with `with_ui: true`, you'll see:
+- **Main window**: Real-time LiDAR scan + map overlay
+- **Particle display**: Current particle distribution (if enabled)
+- **Loop closure events**: Green lines connecting matched poses
+- **Console output**: N_eff, surprise values, resampling events
+
+**Keyboard controls:**
+- `Space`: Pause/resume
+- `S`: Save current map
+- `R`: Reset mapping
+- `Q`: Quit
+
+### Troubleshooting
+
+**Issue: `error while loading shared libraries`**
 ```bash
-# Unit tests for PGFF components
-colcon test --packages-select lightning --ctest-args tests pgff*
+# Re-source the workspace
+source install/setup.bash
+```
 
-# Full benchmark suite
-./scripts/benchmark_comparison.sh
+**Issue: `No such file or directory: ros2.db3`**
+```bash
+# Check bag path is correct
+ls data/VBR/campus/ros2.db3
+
+# Or update config file with correct path
+```
+
+**Issue: `Segmentation fault` on startup**
+```bash
+# Check config file syntax
+cat config/pgff_vbr.yaml
+
+# Verify all dependencies installed
+bash scripts/install_dep.sh
+```
+
+**Issue: Images not displaying in README on GitHub**
+```bash
+# Make sure image files exist without spaces
+ls -la doc/figure1.jpg doc/figure2.jpg
+
+# Paths should be relative: doc/figure1.jpg (not docs/)
 ```
 
 ---
 
-## Acknowledgments
+## Method Summary
 
-PGFF builds upon excellent prior work in SLAM:
-- **LIGHTNING-LM** for loop closure framework
-- **FAST-LIO2** for efficient LiDAR-inertial odometry
-- **iVox** for incremental voxel hashing
-- **LIO-SAM** for loop closure framework
+### Geometric Surprise Prior
 
+PGFF computes local geometric properties from neighborhood covariance and eigenvalues, then compares observed feature geometry against regional expectations using KL divergence. Points whose local geometry differs from the expected neighborhood structure receive higher weights.
 
-Hardware support:
-- Tested on Ouster OS1-128, Velodyne VLP-16, Livox Mid-360
-- IMU: Xsens MTi-300, Microstrain 3DM-GX5
+### Particle-Based Feature Weighting
 
----
+Particles are initialized from the IMU-predicted motion uncertainty. Each particle evaluates whether a point produces a valid correspondence. Particle consensus is then used to estimate feature reliability. The paper uses adaptive resampling based on effective sample size to preserve particle diversity when uncertainty grows.
 
-## License
+The final feature weight is a product of the geometric surprise term and the consensus term.
 
-[Specify license - MIT, GPL, Apache, etc.]
+### Multi-Hypothesis Loop Closure
 
----
+Instead of accepting a loop closure as soon as a similarity score is high, PGFF keeps multiple hypotheses alive. Evidence is accumulated over time with Bayesian updates, and only the dominant hypothesis is eventually committed. This helps avoid wrong closures in symmetric or repetitive scenes.
 
+## Experimental Results
 
-**Last Updated:** March 20, 2026  
-**Version:** 1.0.0
+The paper evaluates PGFF on the **VBR** dataset and the **NCLT** benchmark. These datasets include dynamic objects, geometric degeneracy, and perceptual aliasing.
+
+Reported results include:
+
+- **23.5% lower ATE** compared to **FAST-LIO2**
+- **29.8% lower ATE** compared to **LIO-SAM**
+- **10.1% faster IEKF convergence**
+- **0.7% total runtime overhead**
+- **58% fewer false positives** in loop closure
+- **94% recall** for loop closure
+
+The paper also reports improved uncertainty calibration and shows that PGFF is especially beneficial in geometrically degenerate corridor-like environments.
+
+## Key Parameters Reported in the Paper
+
+- Neighborhood size: `k = 20`
+- Base particle count: `M = 50`
+- Consensus sharpness: `β = 2.0`
+- Resampling threshold: `γ = 0.5`
+- Loop-closure rejection threshold: `τreject = 0.01`
+- Maximum hypotheses: `Hmax = 20`
+
+## Limitations
+
+The paper explicitly notes that PGFF cannot create information where none exists. In extremely degenerate environments with no distinguishing geometry, all features can receive low weights and drift may still occur. The current implementation also assumes static environments and does not explicitly model dynamic objects beyond conservative reweighting.
+
+## Summary
+
+PGFF reframes SLAM as a bidirectional process: state uncertainty influences which features are trusted, and reliable features improve state estimation. Its main contribution is not just a new filter, but a tighter link between perception and estimation.
+
+## Citation
+
+If you reference this project, cite:
+
+**From Particles to Features: Uncertainty-Guided Geometric Reasoning for Robust SLAM**
