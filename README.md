@@ -47,7 +47,7 @@ Particle-Guided Feature Fusion (PGFF) is a LiDAR-inertial SLAM framework that sh
 
 The paper’s central argument is that SLAM often treats state estimation probabilistically while leaving feature extraction and loop closure deterministic. PGFF addresses that asymmetry by making feature weighting uncertainty-aware.
 
-![Figure 1: Traditional LiDAR-inertial odometry versus the proposed PGFF framework.](doc/figure1.jpg)
+![Figure 1: Traditional LiDAR-inertial odometry versus the proposed PGFF framework.](doc/rfigure1.jpg)
 
 *Figure 1.  Comparison of (a) traditional LiDAR-inertial odometry pipelines and (b) the proposed PGFF framework. Traditional approaches treat feature extraction
 as deterministic preprocessing with one-way information flow.*
@@ -71,7 +71,7 @@ as deterministic preprocessing with one-way information flow.*
 
 ## System Pipeline
 
-![Figure 2: PGFF system architecture and data flow.](doc/figure2.jpg)
+![Figure 2: PGFF system architecture and data flow.](doc/rfigure2.jpg)
 
 *Figure 2. System architecture of PGFF.*
 
